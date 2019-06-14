@@ -197,7 +197,7 @@ class Slider(HitObject):
 		self.sliderHitSounds = resizeList(self.sliderHitSounds, val + 1, HitSound())
 
 	def _loadFromBeatmapFile(self, objectInfo):
-		if len(objectInfo) <= 10:
+		if len(objectInfo) <= 7:
 			raise ValueError('Object info too short')
 
 		super()._loadFromBeatmapFile(objectInfo)
@@ -208,19 +208,19 @@ class Slider(HitObject):
 		self.curvePoints = [tuple(map(int, p.split(':'))) for p in sliderPoints]
 		
 		self.sliderLength = int(objectInfo[7])
-
-		self.sliderHitSounds = [HitSound(int(n)) for n in objectInfo[8].split('|')]
-		samples = [tuple(map(int, s.split(':'))) for s in objectInfo[9].split('|')]
-		for a,b in range(len(samples)):
-			self.sliderHitSounds[i].sampleSet = a
-			self.sliderHitSounds[i].additionSet = b
+		if 8 < len(objectInfo):
+			self.sliderHitSounds = [HitSound(int(n)) for n in objectInfo[8].split('|')]
+			samples = [tuple(map(int, s.split(':'))) for s in objectInfo[9].split('|')]
+			for a,b in range(len(samples)):
+				self.sliderHitSounds[i].sampleSet = a
+				self.sliderHitSounds[i].additionSet = b
 
 		self.repeatCount = int(objectInfo[6])
-
-		self.hitSound._loadExtraSampleInfo(objectInfo, 10)
+		if 10 < len(objectInfo):
+			self.hitSound._loadExtraSampleInfo(objectInfo, 10)
 
 	def getSaveString(self):
-		return f'{super().getSaveString()},{TYPE_TO_STR[self.sliderType]}|{"|".join(f"{x},{y}" for x,y in self.curvePoints)},{self.repeatCount},{self.sliderLength},{"|".join(str(h.sounds) for h in self.sliderHitSounds)},{"|".join(f"{h.sampleSet}:{h.additionSet}" for h in self.sliderHitSounds)},{self.hitSound._getExtrasString()}'
+		return f'{super().getSaveString()},{self.TYPE_TO_STR[self.sliderType]}|{"|".join(f"{x},{y}" for x,y in self.curvePoints)},{self.repeatCount},{self.sliderLength},{"|".join(str(h.sounds) for h in self.sliderHitSounds)},{"|".join(f"{h.sampleSet}:{h.additionSet}" for h in self.sliderHitSounds)},{self.hitSound._getExtrasString()}'
 
 class Spinner(HitObject):
 	def __init__(self, **kwargs):
@@ -228,12 +228,13 @@ class Spinner(HitObject):
 		self.endTime = kwargs.get('endTime', 0)
 
 	def _loadFromBeatmapFile(self, objectInfo):
-		if len(objectInfo) <= 10:
+		if len(objectInfo) <= 5:
 			raise ValueError('Object info too short')
 
 		super()._loadFromBeatmapFile(objectInfo)
 		self.endTime = int(objectInfo[5])
-		self.hitSound._loadExtraSampleInfo(objectInfo, 6)
+		if 6 < len(objectInfo):
+			self.hitSound._loadExtraSampleInfo(objectInfo, 6)
 
 	def getSaveString(self):
 		return f'{super().getSaveString()},{self.endTime},{self.hitSound._getExtrasString()}'

@@ -1,7 +1,7 @@
 from .objects import *
 from .enums import *
 from .beatmapmeta import BeatmapMetadata
-from .events import Event
+from .events import *
 
 class TimingPoint:
 	def __init__(self, **kwargs):
@@ -17,12 +17,13 @@ class TimingPoint:
 		self = cls()
 		self.time = int(d[0])
 		self.msPerBeat = float(d[1]) # or -(percentage of previous msPerBeat) if inherited
-		self.beatsPerBar = int(d[2])
-		self.hitSound.sampleSet = int(d[3])
-		self.hitSound.customIndex = int(d[4])
-		self.hitSound.volume = int(d[5])
-		self.inherited = int(d[6]) != 0
-		self.kiai = int(d[7]) != 0
+		if len(d) > 2:
+			self.beatsPerBar = int(d[2])
+			self.hitSound.sampleSet = int(d[3])
+			self.hitSound.customIndex = int(d[4])
+			self.hitSound.volume = int(d[5])
+			self.inherited = int(d[6]) != 0
+			self.kiai = int(d[7]) != 0
 		return self
 
 	def getSaveString(self):
@@ -31,6 +32,35 @@ class TimingPoint:
 class Beatmap(BeatmapMetadata):
 	def __init__(self, filename=None):
 		super().__init__()
+		self.audioFile = ''
+		self.audioLeadIn = 0
+		self.previewTime = 0
+		self.countdown = False
+		self.sampleSet = SampleSet.AUTO
+		self.stackLeniency = 0.0
+		self.mode = Mode.STD
+		self.letterboxInBreaks = False
+		self.widescreenStoryboard = False
+		self.editorSpacing = 0.0
+		self.editorBeatDivisor = 0
+		self.editorGridSize = 0
+		self.editorZoom = 0.0
+		self.titleA = ''
+		self.titleU = ''
+		self.artistA = ''
+		self.artistU = ''
+		self.creator = ''
+		self.diffName = ''
+		self.source = ''
+		self.tags = ''
+		self.mapID = 0
+		self.mapsetID = 0
+		self.HP = 0.0
+		self.CS = 0.0
+		self.OD = 0.0
+		self.AR = 0.0
+		self.SV = 0.0
+		self.msPerBeat = 0.0
 		self.eof = True
 		self.eofLast = True
 		self.lastLine = ''
@@ -79,6 +109,7 @@ class Beatmap(BeatmapMetadata):
 			eventStr = self.readLine()
 			if len(eventStr) == 0:
 				break
+			self.lineBack()
 			self.events.append(Event.fromFile(self))
 		self.inFile.seek(oldPos)
 		self.eof = oldEof
@@ -162,7 +193,7 @@ class Beatmap(BeatmapMetadata):
 						self.tags = v
 					elif k == 'BeatmapID':
 						self.mapID = int(v)
-					elif k == 'BeaprocessEventstmapSetID':
+					elif k == 'BeatmapSetID':
 						self.mapsetID = int(v)
 					#Difficulty
 					elif k == 'HPDrainRate':

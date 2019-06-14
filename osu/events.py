@@ -37,7 +37,7 @@ class Event:
 	def fromFile(f):
 		eventInfo = f.parseVariables(f.readLine()).split(',')
 		f.lineBack()
-		if len(eventInfo) <= 0:
+		if len(eventInfo) == 0 or (len(eventInfo) == 1 and not len(eventInfo[0])):
 			raise ValueError('Event info too short')
 
 		eventType = eventInfo[0]
@@ -56,7 +56,9 @@ class Event:
 		elif eventType in ['6', 'Animation']:
 			ret = AnimationEvent()
 		else:
-			raise ValueError('Unknown event type')
+			ev = f.readLine()
+			f.lineBack()
+			raise ValueError(f'Unknown event type: {eventType}; event: {repr(ev)}.')
 
 		ret._loadFromFile(f)
 		ret._loadChildEventsFromFile(f)
@@ -124,7 +126,7 @@ class BackgroundEvent(Event):
 			raise ValueError('Event info too short')
 		self.filename = eventInfo[2].strip('"')
 		self.time = int(eventInfo[1])
-		if len(eventInfo >= 5):
+		if len(eventInfo) >= 5:
 			self.x = int(eventInfo[3])
 			self.x = int(eventInfo[4])
 
