@@ -8,8 +8,8 @@ except:
 
 # Config start. But the filters themselves are configured at line 58!
 # Use double backslash
-INPUT = '/mnt/c/osu!'
-OUTPUT = '/mnt/c/Users/pavlukivan/code/tmp'
+INPUT = 'C:\\osu!'
+OUTPUT = 'C:\\Users\\pavlukivan\\code\\tmp'
 # You can replace "None" with some collection name (but make sure to quote it)
 COLLECTION = None
 MODE = osu.Mode.STD #you can do TAIKO, MANIA, CTB
