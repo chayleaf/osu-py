@@ -1,4 +1,5 @@
 from .enums import *
+from .timing import TimingPoint
 import datetime, os.path
 
 class BeatmapMetadata:
@@ -36,7 +37,7 @@ class BeatmapMetadata:
 		self.playerRank = [Rank.N for i in range(4)]
 		self.offset = 0
 		self.stackLeniency = 0.0
-		self.mode = 0
+		self.mode = Mode.STD
 		self.source = ''
 		self.tags = ''
 		self.onlineOffset = 0
@@ -94,10 +95,7 @@ class BeatmapMetadata:
 		self.timingPoints = []
 		timingPointCnt = osudb.readInt()
 		for i in range(timingPointCnt):
-			msPerBeat = osudb.readDouble()
-			time = osudb.readDouble()
-			inherit = osudb.readByte()
-			self.timingPoints.append([msPerBeat, time, inherit])
+			self.timingPoints.append(TimingPoint.fromOsuDb(osudb))
 
 		self.mapID = osudb.readInt()
 		self.mapsetID = osudb.readInt()
@@ -161,10 +159,8 @@ class BeatmapMetadata:
 		osudb.writeInt(self.previewTime)
 
 		osudb.writeInt(len(self.timingPoints))
-		for msPerBeat, time, inherit in self.timingPoints:
-			osudb.writeDouble(msPerBeat)
-			osudb.writeDouble(time)
-			osudb.writeByte(inherit)
+		for tp in self.timingPoints:
+			tp.writeToDatabase(osudb)
 
 		osudb.writeInt(self.mapID)
 		osudb.writeInt(self.mapsetID)

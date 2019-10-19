@@ -2,79 +2,20 @@ from .objects import *
 from .enums import *
 from .beatmapmeta import BeatmapMetadata
 from .events import *
-
-class TimingPoint:
-	KIAI = 1
-	OMITFIRSTBARLINE = 8
-	
-	def __init__(self, **kwargs):
-		self.time = kwargs.get('time', 0)
-		self.msPerBeat = kwargs.get('msPerBeat', 0)
-		self.beatsPerBar = kwargs.get('beatsPerBar', 0)
-		self.hitSound = HitSound(kwargs)
-		self.inheritable = kwargs.get('inheritable', False)
-		self.kiai = kwargs.get('kiai', False)
-		self.omitFirstBarline = kwargs.get('omitFirstBarline', False)
-
-	@property
-	def kiaiFlags(self):
-		return (self.KIAI if self.kiai else 0) | (self.OMITFIRSTBARLINE if self.omitFirstBarline else 0)
-	@kiaiFlags.setter
-	def kiaiFlags(self, v):
-		self.kiai = (v | self.KIAI) != 0
-		self.omitFirstBarline = (v | self.OMITFIRSTBARLINE) != 0	
-
-	@classmethod
-	def fromFileData(cls, d):
-		self = cls()
-		try:
-			self.time = int(float(d[0]))
-		except ValueError: #I've found the value "1E-06" in one beatmap
-			self.time = 0
-		self.msPerBeat = float(d[1]) # or -(percentage of previous msPerBeat) if inherited
-		if len(d) > 2:
-			self.beatsPerBar = int(d[2])
-			self.hitSound.sampleSet = int(d[3])
-			self.hitSound.customIndex = int(d[4])
-			self.hitSound.volume = int(d[5])
-			self.inheritable = int(d[6]) != 0
-			self.kiaiFlags = int(d[7])
-		return self
-
-	def getSaveString(self):
-		return f'{self.time},{self.msPerBeat},{self.beatsPerBar},{self.hitSound.sampleSet},{self.hitSound.customIndex},{self.hitSound.volume},{int(self.inheritable)},{self.kiaiFlags}'
+from .timing import TimingPoint
 
 class Beatmap(BeatmapMetadata):
 	def __init__(self, filename=None):
 		super().__init__()
-		self.audioFile = ''
 		self.audioLeadIn = 0
-		self.previewTime = 0
 		self.countdown = False
 		self.sampleSet = SampleSet.AUTO
-		self.stackLeniency = 0.0
-		self.mode = Mode.STD
 		self.letterboxInBreaks = False
 		self.widescreenStoryboard = False
 		self.editorSpacing = 0.0
 		self.editorBeatDivisor = 0
 		self.editorGridSize = 0
 		self.editorZoom = 0.0
-		self.titleA = ''
-		self.titleU = ''
-		self.artistA = ''
-		self.artistU = ''
-		self.creator = ''
-		self.diffName = ''
-		self.source = ''
-		self.tags = ''
-		self.mapID = 0
-		self.mapsetID = -1
-		self.HP = 0.0
-		self.CS = 0.0
-		self.OD = 0.0
-		self.AR = 0.0
-		self.SV = 0.0
 		self.msPerBeat = 0.0
 		self.eof = True
 		self.eofLast = True
@@ -115,11 +56,12 @@ class Beatmap(BeatmapMetadata):
 		return s
 
 	def processEvents(self):
-		if self.eventsPos != -1:
-			oldPos = self.inFile.tell()
-			self.inFile.seek(self.eventsPos)
-			oldEof = self.eof
-			self.eof = False
+		if self.eventsPos < 0:
+			return
+		oldPos = self.inFile.tell()
+		self.inFile.seek(self.eventsPos)
+		oldEof = self.eof
+		self.eof = False
 		while not self.eof:
 			eventStr = self.readLine()
 			if len(eventStr) == 0:
