@@ -21,8 +21,8 @@ class TimingPoint:
 		return (self.KIAI if self.kiai else 0) | (self.OMITFIRSTBARLINE if self.omitFirstBarline else 0)
 	@kiaiFlags.setter
 	def kiaiFlags(self, v):
-		self.kiai = (v | self.KIAI) != 0
-		self.omitFirstBarline = (v | self.OMITFIRSTBARLINE) != 0
+		self.kiai = (v & self.KIAI) != 0
+		self.omitFirstBarline = (v & self.OMITFIRSTBARLINE) != 0
 	
 	@property
 	def bpm(self):
