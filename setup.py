@@ -5,7 +5,7 @@ with open("README.md", "r") as f:
 
 setuptools.setup(
 	name='osu.py',
-	version='0.0.17',
+	version='0.0.18',
 	author='pavlukivan',
 	author_email='ivanpavluk00@gmail.com',
 	description='A multipurpose osu! library, aiming to cover practically any use case over time',
