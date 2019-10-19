@@ -12,7 +12,10 @@ class TimingPoint:
 		
 		# below fields aren't recorded in osu!.db
 		self.beatsPerBar = kwargs.get('beatsPerBar', 0)
-		self.hitSound = HitSound(kwargs)
+		if 'hitSound' in kwargs.keys():
+			self.hitSound = kwargs['hitSound']
+		else:
+			self.hitSound = HitSound(**kwargs)
 		self.kiai = kwargs.get('kiai', False)
 		self.omitFirstBarline = kwargs.get('omitFirstBarline', False)
 
