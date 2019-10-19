@@ -4,30 +4,45 @@ from .beatmapmeta import BeatmapMetadata
 from .events import *
 
 class TimingPoint:
+	KIAI = 1
+	OMITFIRSTBARLINE = 8
+	
 	def __init__(self, **kwargs):
 		self.time = kwargs.get('time', 0)
 		self.msPerBeat = kwargs.get('msPerBeat', 0)
 		self.beatsPerBar = kwargs.get('beatsPerBar', 0)
 		self.hitSound = HitSound(kwargs)
-		self.inherited = kwargs.get('inherited', False)
+		self.inheritable = kwargs.get('inheritable', False)
 		self.kiai = kwargs.get('kiai', False)
+		self.omitFirstBarline = kwargs.get('omitFirstBarline', False)
+
+	@property
+	def kiaiFlags(self):
+		return (self.KIAI if self.kiai else 0) | (self.OMITFIRSTBARLINE if self.omitFirstBarline else 0)
+	@kiaiFlags.setter
+	def kiaiFlags(self, v):
+		self.kiai = (v | self.KIAI) != 0
+		self.omitFirstBarline = (v | self.OMITFIRSTBARLINE) != 0	
 
 	@classmethod
 	def fromFileData(cls, d):
 		self = cls()
-		self.time = int(d[0])
+		try:
+			self.time = int(float(d[0]))
+		except ValueError: #I've found the value "1E-06" in one beatmap
+			self.time = 0
 		self.msPerBeat = float(d[1]) # or -(percentage of previous msPerBeat) if inherited
 		if len(d) > 2:
 			self.beatsPerBar = int(d[2])
 			self.hitSound.sampleSet = int(d[3])
 			self.hitSound.customIndex = int(d[4])
 			self.hitSound.volume = int(d[5])
-			self.inherited = int(d[6]) != 0
-			self.kiai = int(d[7]) != 0
+			self.inheritable = int(d[6]) != 0
+			self.kiaiFlags = int(d[7])
 		return self
 
 	def getSaveString(self):
-		return f'{self.time},{self.msPerBeat},{self.beatsPerBar},{self.hitSound.sampleSet},{self.hitSound.customIndex},{self.hitSound.volume},{int(self.inherited)},{int(self.kiai)}'
+		return f'{self.time},{self.msPerBeat},{self.beatsPerBar},{self.hitSound.sampleSet},{self.hitSound.customIndex},{self.hitSound.volume},{int(self.inheritable)},{self.kiaiFlags}'
 
 class Beatmap(BeatmapMetadata):
 	def __init__(self, filename=None):
@@ -54,7 +69,7 @@ class Beatmap(BeatmapMetadata):
 		self.source = ''
 		self.tags = ''
 		self.mapID = 0
-		self.mapsetID = 0
+		self.mapsetID = -1
 		self.HP = 0.0
 		self.CS = 0.0
 		self.OD = 0.0
@@ -86,7 +101,7 @@ class Beatmap(BeatmapMetadata):
 			if len(s) == 0:
 				self.eof = True
 			self.eofLast = self.eof
-			self.lastLine = s.strip()
+			self.lastLine = s.rstrip()
 		self.returnLast = False
 		return self.lastLine
 
@@ -121,8 +136,11 @@ class Beatmap(BeatmapMetadata):
 		self.filename = filename
 
 		firstLine = self.readLine()
-		if 'osu file format' in firstLine and 'v' in firstLine:
-			self.version = int(firstLine.split('v')[-1])
+		if 'v' in firstLine:
+			version = firstLine.split('v')[-1]
+			if not version.isnumeric():
+				raise ValueError('Invalid file format')
+			self.version = int(version)
 		else:
 			raise ValueError('Invalid file format')
 		
@@ -137,7 +155,12 @@ class Beatmap(BeatmapMetadata):
 					s = self.readLine()
 					if len(s) == 0:
 						break
-					k,v = s.split(':' if sectionName in ['Metadata', 'Difficulty'] else ': ', 1)
+					kv = None
+					if sectionName not in ['Metadata', 'Difficulty']:
+						kv = s.split(': ', 1)
+					if len(kv) < 2:
+						kv = s.split(':', 1)
+					k,v = kv
 					
 					#General
 					if k == 'AudioFilename':
@@ -234,7 +257,7 @@ class Beatmap(BeatmapMetadata):
 					if len(s) == 0:
 						break
 					k,v = s.split(' : ')
-					v = tuple(map(int, ','.split(v)))
+					v = tuple(map(int, v.split(',')))
 					if k == 'SliderBody':
 						self.sliderColor = v
 					elif k == 'SliderTrackOverride':
@@ -265,7 +288,7 @@ class Beatmap(BeatmapMetadata):
 			print('AudioFilename:', self.audioFile, file=f)
 			print('AudioLeadIn:', self.audioLeadIn, file=f)
 			print('PreviewTime:', self.previewTime, file=f)
-			print('Countdown', int(self.countdown), file=f)
+			print('Countdown:', int(self.countdown), file=f)
 			print('SampleSet:', self.sampleSet, file=f)
 			print('StackLeniency:', self.stackLeniency, file=f)
 			print('Mode:', self.mode, file=f)

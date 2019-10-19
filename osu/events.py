@@ -88,7 +88,7 @@ class Event:
 			if eventInfo[1] not in ' _':
 				target = self
 
-			eventInfo = eventInfo.trim(' ').trim('_').split(',')
+			eventInfo = eventInfo.strip(' ').strip('_').split(',')
 			oldI = -1
 			eventType = eventTypeDict[eventInfo[0]]
 			i = 1
@@ -131,7 +131,7 @@ class BackgroundEvent(Event):
 			self.x = int(eventInfo[4])
 
 	def _getBaseSaveString(self):
-		return f'Background,{self.time},{self.filename},{self.x},{self.y}'
+		return f'0,{self.time},{self.filename},{self.x},{self.y}'
 
 class VideoEvent(BackgroundEvent):
 	def __init__(self, **kwargs):
@@ -195,7 +195,7 @@ class SpriteEvent(Event):
 
 	@staticmethod
 	def _parseOrigin(o):
-		if o.isnumeric:
+		if o.isnumeric():
 			return int(o)
 
 		if o == 'TopLeft':
@@ -271,7 +271,7 @@ class SampleEvent(Event):
 
 	def _loadFromFile(self, f):
 		eventInfo = f.parseVariables(f.readLine()).split(',')
-		if len(eventInfo) <= 5:
+		if len(eventInfo) <= 4:
 			raise ValueError('Event info too short')
 		self.time = int(eventInfo[1])
 		self.layer = self._parseLayer(eventInfo[2])
@@ -306,7 +306,7 @@ class AnimationEvent(SpriteEvent):
 		self._loadSpriteEventInfo(eventInfo)
 		self.frameCount = int(eventInfo[6])
 		self.frameDelay = float(eventInfo[7])
-		if len(eventInfo > 8):
+		if len(eventInfo) > 8:
 			if eventInfo[8].isnumeric():
 				self.loopType = int(eventInfo[8])
 			elif eventInfo[8] == 'Forever':

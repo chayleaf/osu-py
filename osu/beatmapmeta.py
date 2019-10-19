@@ -31,7 +31,7 @@ class BeatmapMetadata:
 		self.timingPoints = []
 
 		self.mapID = 0
-		self.mapsetID = 0
+		self.mapsetID = -1
 		self.threadID = 0
 		self.playerRank = [Rank.N for i in range(4)]
 		self.offset = 0
