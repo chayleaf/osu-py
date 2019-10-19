@@ -100,7 +100,7 @@ class Beatmap(BeatmapMetadata):
 					kv = None
 					if sectionName not in ['Metadata', 'Difficulty']:
 						kv = s.split(': ', 1)
-					if len(kv) < 2:
+					if not kv or len(kv) < 2:
 						kv = s.split(':', 1)
 					k,v = kv
 					
