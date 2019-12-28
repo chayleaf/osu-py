@@ -121,8 +121,6 @@ class BeatmapMetadata:
 		self.bgDim = osudb.readShort()
 
 		self.lastEdit = osudb.readInt()
-		if osudb.version > 20160403:
-			self.unk0 = osudb.readInt()
 
 		return self
 

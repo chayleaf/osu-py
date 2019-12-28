@@ -1,3 +1,5 @@
+from .enums import *
+
 class SampleSet:
 	ALL = -1
 	ANY = ALL
@@ -6,6 +8,17 @@ class SampleSet:
 	NORMAL = 1
 	SOFT = 2
 	DRUM = 3
+	
+	@staticmethod
+	def name(set):
+		if set == 0:
+			return 'Auto'
+		if set == 1:
+			return 'Normal'
+		if set == 2:
+			return 'Soft'
+		if set == 3:
+			return 'Drum'
 
 class HitSound:
 	NONE = 0
@@ -23,7 +36,7 @@ class HitSound:
 		self.customIndex = kwargs.get('customIndex', 0)
 		#below fields aren't available for event triggers
 		self.volume = kwargs.get('sampleVolume', 100)
-		self.filename = kwargs.get('filename', '') #override default file path which is {sampleSetName}-hit{soundType}{index}.wav
+		self.filenameOverride = kwargs.get('filename', '') #override default file path which is {sampleSetName}-hit{soundType}{index}.wav
 
 	def _loadExtraSampleInfo(self, objectInfo, i):
 		if i >= len(objectInfo):
@@ -35,10 +48,16 @@ class HitSound:
 		self.additionSet = int(extras[1])
 		self.customIndex = int(extras[2])
 		self.volume = int(extras[3])
-		self.filename = extras[4]
+		self.filenameOverride = extras[4]
 
 	def _getExtrasString(self):
-		return f'{self.sampleSet}:{self.additionSet}:{self.customIndex}:{self.volume}:{self.filename}'
+		return f'{self.sampleSet}:{self.additionSet}:{self.customIndex}:{self.volume}:{self.filenameOverride}'
+	
+	def filenameForSound(self, sound, object='hit', mode=Mode.STD):
+		modeStr = ''
+		if mode == Mode.TAIKO:
+			modeStr = 'taiko-'
+		return self.filenameOverride if self.filenameOverride else f'{modeStr}{SampleSet.name(self.sampleSet).tolower()}-{object}{sound}'
 
 	@property
 	def normal(self):
