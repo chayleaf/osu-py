@@ -30,15 +30,24 @@ def bitProperty(shift, requirements=[]): #requirements are expected to be bitPro
 	@property
 	def ret(self):
 		return (self.flags & mask) != 0
-	@ret.setter
-	def ret(self, val):
-		if val:
-			self.flags |= mask
-			if len(requirements):
-				for req in requirements:
-					req.fset(self, True)
-		else:
-			self.flags &= ~mask
+	if len(requirements):
+		@ret.setter
+		def ret(self, val):
+			if val:
+				self.flags |= mask
+				if len(requirements):
+					for req in requirements:
+						req.fset(self, True)
+			else:
+				self.flags &= ~mask
+	else:
+		@ret.setter
+		def ret(self, val):
+			if val:
+				self.flags |= mask
+			else:
+				self.flags &= ~mask
+		
 	return ret
 
 def anyPropertySet(*requirements):
@@ -50,11 +59,23 @@ def anyPropertySet(*requirements):
 		return False
 	return ret
 
-class Permissions:
-	def __init__(self, flags=0):
+class BitFlags:
+	def __init__(self, flags=0, **kwargs):
 		self.flags = int(flags)
+		for k in kwargs.keys():
+			if getattr(self, k, None) is not property:
+				setattr(self, k, kwargs[k])
+			else:
+				raise ValueError(f'Parameter {k} not supported!')
 	
-	#perhaps it means the person isnt restricted?
+	def __int__(self):
+		return self.flags
+	
+	def __repr__(self):
+		return f"{type(self).__name__}({self.flags})"
+
+class Permissions(BitFlags):
+	#perhaps it means the user isnt restricted?
 	normal = bitProperty(0)
 	
 	#BAT is now split, so this could very well be split to 2 flags by now.
@@ -66,11 +87,8 @@ class Permissions:
 	friend = bitProperty(3)
 	peppy = bitProperty(4)
 	tournament = bitProperty(5)
-	
-class Mods:
-	def __init__(self, flags=0):
-		self.flags = int(flags)
-	
+
+class Mods(BitFlags):
 	@property
 	def NM(self):
 		return self.flags == 0
@@ -106,12 +124,40 @@ class Mods:
 	key2 = bitProperty(28)
 	V2 = bitProperty(29)
 	MR = bitProperty(30)
+	RESERVED = bitProperty(31) #as of 2020/01/01 it it's unused
 	keyMods = anyPropertySet(key1, key2, key3, key4, key5, key6, key7, key8, key9, coop)
 	autoMods = anyPropertySet(RL, auto, AP, cinema)
 	unrankedManiaMods = anyPropertySet(RD, coop, key1, key2, key3)
 	unranked = anyPropertySet(autoMods, unrankedManiaMods, TP, V2)
 	scoreIncreaseMods = anyPropertySet(HD, HR, DT, FL, FI)
 	
+	@property
+	def ranked(self):
+		return not self.unranked
+	
+	@property
+	def mods(self):
+		s = []
+		for mod in ['NM', 'EZ', 'NF', 'HT', 'HR', 'SD', 'PF', 'DT', 'NC', 'FI', 'HD', 'FL', 'SO', 'TD', 'MR', 'RD', 'Coop']:
+			if mod == 'DT' and self.NC:
+				continue
+			if getattr(self, mod):
+				s.append(mod)
+		for keys in range(1, 10):
+			if getattr(self, f'Key{keys}'):
+				s.append(f'{keys}K')
+		for mod in ['RL', 'AP', 'Cinema', 'TP', 'Auto', 'V2']:
+			if getattr(self, mod):
+				s.append(mod)
+		return s
+	
+	def __str__(self):
+		return ','.join(self.mods)
+	
+	def __repr__(self):
+		return f"Mods({', '.join(self.mods)})"
+
+	#aliases
 	noMod = NM
 	nomod = NM
 	NoMod = NM
@@ -219,30 +265,7 @@ class Mods:
 	scoreV2 = V2
 	scorev2 = V2
 	ScoreV2 = V2
+	Mirror = MR
+	mirror = MR
 	Unranked = unranked
-
-	@property
-	def ranked(self):
-		return not self.unranked
 	Ranked = ranked
-
-	def __int__(self):
-		return self.mods
-	
-	def __str__(self):
-		s = []
-		for mod in ['NM', 'EZ', 'NF', 'HT', 'HR', 'SD', 'PF', 'DT', 'NC', 'FI', 'HD', 'FL', 'SO', 'TD', 'MR', 'RD', 'Coop']:
-			if mod == 'DT' and self.NC:
-				continue
-			if getattr(self, mod):
-				s.append(mod)
-		for keys in range(1, 10):
-			if getattr(self, f'Key{keys}'):
-				s.append(f'{keys}K')
-		for mod in ['RL', 'Auto', 'AP', 'Cinema', 'TP', 'V2']:
-			if getattr(self, mod):
-				s.append(mod)
-		return ','.join(s)
-	
-	def __repr__(self):
-		return f"Mods({', '.join(str(self).split(','))})"

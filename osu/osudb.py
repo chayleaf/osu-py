@@ -1,5 +1,6 @@
 from .utility import BinaryFile
 from .beatmapmeta import BeatmapMetadata
+from .enums import Permissions
 
 class OsuDb(BinaryFile):
 	def __init__(self, filename=None):
@@ -14,6 +15,12 @@ class OsuDb(BinaryFile):
 			super().__init__()
 		else:
 			self.load(filename)
+	
+	def beatmapInfoFromHash(self, h):
+		for bm in self.beatmaps:
+			if bm.hash == h:
+				return bm
+		return None
 
 	def load(self, filename):
 		super().__init__(filename, 'r')
@@ -31,7 +38,7 @@ class OsuDb(BinaryFile):
 		
 		try:
 			if self.username:
-				self.permissions = self.readInt()
+				self.permissions = Permissions(self.readInt())
 		except (KeyboardInterrupt, SystemExit):
 			raise
 		except:
@@ -48,6 +55,5 @@ class OsuDb(BinaryFile):
 		
 		for c in self.beatmaps:
 			c.writeToDatabase(self)
-			
-		if self.permissions:
-			self.writeInt(self.unk0)
+		
+		self.writeInt(int(self.permissions))
