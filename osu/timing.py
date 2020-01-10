@@ -12,7 +12,7 @@ class TimingPoint:
 	kiaiFlags: KiaiFlags = field(default_factory=KiaiFlags)
 	time: int = 0
 	#: Usage depends on timing point type. I recommend using BPM and SV properties instead.
-	msPerBeat: int = 500
+	msPerBeat: float = 500.0
 	#: Whether the timing point is inheritable/red
 	inheritable: bool = True
 	#: Not recorded in osu!.db
@@ -108,4 +108,4 @@ class TimingPoint:
 		osudb.writeByte(self.inheritable)
 
 	def __str__(self) -> str:
-		return f'{self.time},{self.msPerBeat},{self.beatsPerBar},{self.hitSound.sampleSet},{self.hitSound.customIndex},{self.hitSound.volume},{int(self.inheritable)},{self.kiaiFlags}'
+		return f'{self.time:d},{self.msPerBeat:g},{self.beatsPerBar:d},{self.hitSound.sampleSet:d},{self.hitSound.customIndex:d},{self.hitSound.volume:d},{self.inheritable:d},{self.kiaiFlags:d}'

@@ -39,7 +39,7 @@ class HitSound:
 	
 	@property
 	def serializableForEventTrigger(self) -> bool:
-		return self.volumePercentage == 100.0 and not self.filenameOverride
+		return self.volume == 1.0 and not self.filenameOverride
 	
 	@property
 	def serializableForSliderEdge(self) -> bool:
@@ -70,7 +70,8 @@ class HitSound:
 		self.filenameOverride = extras[4]
 
 	def __str__(self) -> str:
-		return f'{self.sampleSet:d}:{self.additionSet:d}:{self.customIndex:d}:{int(self.volumePercentage):d}:{self.filenameOverride}'
+		filenameOverride = self.filenameOverride if self.filenameOverride is not None else ''
+		return f'{self.sampleSet:d}:{self.additionSet:d}:{self.customIndex:d}:{int(self.volumePercentage):d}:{filenameOverride}'
 	
 	@property
 	def beatmapSpecific(self) -> bool:
@@ -194,7 +195,7 @@ class HitObject:
 			raise TypeError("Unknown type, override this function to use it")
 		flags.comboStart = self.comboStart
 		flags.comboColorSkip = self.comboColorSkip
-		return f'{self.x:d},{self.y:d},{self.time:d},{flags:d},{self.hitSound.sounds:d}'
+		return f'{self.x:d},{self.y:d},{self.time:d},{flags:d}'
 
 @add_slots
 @dataclass
@@ -310,11 +311,11 @@ class Slider(HitObject):
 		for sound in self.sliderHitSounds:
 			if not sound.serializableForSliderEdge:
 				raise ValueError("Hitsound with custom index, volume or filename can't be serialized for slider edge.")
-		curvePointsStr = '|'.join(f'{p.x}:{p.y}' for p in self.curvePoints)
-		hitSoundsStr = '|'.join(f'{h.sounds}' for h in self.sliderHitSounds)
-		hitAdditionsStr = '|'.join(f'{h.sampleSet}:{h.additionSet}' for h in self.sliderHitSounds)
+		curvePointsStr = '|'.join(f'{p.x:g}:{p.y:g}' for p in self.curvePoints)
+		hitSoundsStr = '|'.join(f'{h.sounds:d}' for h in self.sliderHitSounds)
+		hitAdditionsStr = '|'.join(f'{h.sampleSet:d}:{h.additionSet:d}' for h in self.sliderHitSounds)
 		
-		return f'{super()},{self.sliderType}|{curvePointsStr},{self.slideCount},{self.sliderLength},{hitSoundsStr},{hitAdditionsStr},{self.hitSound}'
+		return f'{super()},{self.sliderType}|{curvePointsStr},{self.slideCount:d},{self.sliderLength:g},{hitSoundsStr},{hitAdditionsStr},{self.hitSound}'
 
 @add_slots
 @dataclass
@@ -339,7 +340,7 @@ class Spinner(HitObject):
 		self.hitSound.loadExtraSampleInfo(objectInfo, 6)
 
 	def __str__(self) -> str:
-		return f'{super()},{self.endTime},{self.hitSound}'
+		return f'{super()},{self.endTime:d},{self.hitSound}'
 
 @add_slots
 @dataclass
@@ -363,4 +364,4 @@ class ManiaHoldNote(HitObject):
 		self.hitSound.loadExtraSampleInfo(whoTfThoughtThisIsAGoodIdea, 1)
 
 	def __str__(self) -> str:
-		return f'{super()},{self.endTime}:{self.hitSound}'
+		return f'{super()},{self.endTime:d}:{self.hitSound}'

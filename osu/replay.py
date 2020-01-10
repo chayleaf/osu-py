@@ -58,6 +58,11 @@ class HitCountInfo:
 		
 		raise NotImplementedError('Accuracy not supported for this mode')
 	
+	def accuracyPercentage(self) -> float:
+		"""Get player accuracy percentage
+		"""
+		return self.accuracy() * 100.0
+	
 	def rank(self):
 		"""Get player rank
 		"""

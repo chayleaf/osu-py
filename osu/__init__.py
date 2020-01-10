@@ -1,6 +1,6 @@
 from .api import ApiV1, ApiV2, BeatmapMetadataOnline
 from .osudb import OsuDb, BeatmapMetadata
-from .collectionsdb import CollectionDb, Collection
+from .collectiondb import CollectionDb, Collection
 from .enums import *
 from .replay import Replay
 from .scoresdb import ScoresDb, Score
