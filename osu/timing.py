@@ -1,75 +1,111 @@
+from __future__ import annotations #allow referencing a not-yet-declared type
 from .objects import *
-import math
+from .enums import KiaiFlags
+from math import inf as infinity
+from dataclasses import dataclass, field
+from typing import Optional
+from .utility import add_slots
 
+@add_slots
+@dataclass
 class TimingPoint:
-	KIAI = 1
-	OMITFIRSTBARLINE = 8
-	
-	def __init__(self, **kwargs):
-		self.time = kwargs.get('time', 0)
-		self.msPerBeat = kwargs.get('msPerBeat', 0)
-		self.inheritable = kwargs.get('inheritable', False)
-		
-		# below fields aren't recorded in osu!.db
-		self.beatsPerBar = kwargs.get('beatsPerBar', 0)
-		if 'hitSound' in kwargs.keys():
-			self.hitSound = kwargs['hitSound']
-		else:
-			self.hitSound = HitSound(**kwargs)
-		self.kiai = kwargs.get('kiai', False)
-		self.omitFirstBarline = kwargs.get('omitFirstBarline', False)
+	kiaiFlags: KiaiFlags = field(default_factory=KiaiFlags)
+	time: int = 0
+	#: Usage depends on timing point type. I recommend using BPM and SV properties instead.
+	msPerBeat: int = 500
+	#: Whether the timing point is inheritable/red
+	inheritable: bool = True
+	#: Not recorded in osu!.db
+	beatsPerBar: int = 4
+	#: Not recorded in osu!.db
+	hitSound: HitSound = field(default_factory=HitSound)
+	#: Parent file, used to look up inheritance
+	file: Optional[BeatmapLocalBase] = None
 
 	@property
-	def kiaiFlags(self):
-		return (self.KIAI if self.kiai else 0) | (self.OMITFIRSTBARLINE if self.omitFirstBarline else 0)
-	@kiaiFlags.setter
-	def kiaiFlags(self, v):
-		self.kiai = (v & self.KIAI) != 0
-		self.omitFirstBarline = (v & self.OMITFIRSTBARLINE) != 0
+	def kiai(self) -> bool:
+		return self.kiaiFlags.kiai
+	@kiai.setter
+	def kiai(self, v: bool) -> None:
+		self.kiaiFlags.kiai = v
 	
 	@property
-	def bpm(self):
-		if self.msPerBeat < 0.0:
-			raise ValueError("Can't get the BPM of an inherited timing point")
-		return 60000 / self.msPerBeat if self.msPerBeat > 0.0 else math.inf
+	def omitFirstBarLine(self) -> bool:
+		return self.kiaiFlags.omitFirstBarLine
+	@omitFirstBarLine.setter
+	def omitFirstBarLine(self, v: bool) -> None:
+		self.kiaiFlags.omitFirstBarLine = v
+	
+	@property
+	def bpm(self) -> float:
+		if not self.inheritable:
+			return self.file.inheritableTimingPointAt(self.time).bpm
+		return 60000 / self.msPerBeat if self.msPerBeat > 0.0 else infinity
 	@bpm.setter
-	def bpm(self, v):
-		self.msPerBeat = 60000 / v if v > 0.0 else math.inf
+	def bpm(self, v: float) -> None:
+		self.msPerBeat = 60000 / v if v > 0.0 else infinity
 		self.inheritable = True
+	BPM = bpm
 	
 	@property
-	def inherited(self):
+	def SV(self) -> float:
+		if self.inheritable:
+			return 1.0
+		return -100.0 / self.msPerBeat if self.msPerBeat < 0.0 else infinity
+	@SV.setter
+	def SV(self, v: float) -> None:
+		self.msPerBeat = -100 / v if v > 0.0 else -infinity
+		self.inheritable = False
+	sv = SV
+	
+	@property
+	def inherited(self) -> bool:
 		return not self.inheritable and self.msPerBeat <= 0.0
 
 	@classmethod
-	def fromFileData(cls, d):
-		self = cls()
-		try:
-			self.time = int(float(d[0]))
-		except ValueError: #I've found the value "1E-06" in one beatmap
-			self.time = 0
+	def loadFromFile(cls, f: Beatmap) -> TimingPoint:
+		d = f.readLine().split(',')
+		if not d:
+			return None
+		self = cls(file=f)
+		self.file = f
+		self.time = int(float(d[0]))
 		self.msPerBeat = float(d[1]) # or -(percentage of previous msPerBeat) if inherited
 		if len(d) > 2:
 			self.beatsPerBar = int(d[2])
-			self.hitSound.sampleSet = int(d[3])
-			self.hitSound.customIndex = int(d[4])
-			self.hitSound.volume = int(d[5])
-			self.inheritable = int(d[6]) != 0
-			self.kiaiFlags = int(d[7])
+			if len(d) > 3:
+				self.hitSound.sampleSet = int(d[3])
+				if len(d) > 4:
+					self.hitSound.customIndex = int(d[4])
+					if len(d) > 5:
+						self.hitSound.volume = int(d[5])
+						if len(d) > 6:
+							self.inheritable = bool(int(d[6]))
+							if len(d) > 7:
+								self.kiaiFlags = KiaiFlags(d[7])
 		return self
 	
 	@classmethod
-	def fromOsuDb(cls, osudb):
+	def loadFromDatabase(cls, osudb: BinaryFile) -> TimingPoint:
 		self = cls()
-		self.msPerBeat = osudb.readDouble()
-		self.time = osudb.readDouble()
-		self.inheritable = osudb.readByte()
+		self.msPerBeat, self.time, self.inheritable = osudb.unpackData('ddb', 17) #optimization
+		#self.msPerBeat = osudb.readDouble()
+		#self.time = osudb.readDouble()
+		#self.inheritable = osudb.readByte()
 		return self
 	
-	def writeToDatabase(cls, osudb):
+	@classmethod
+	def fromDatabaseData(cls, msPerBeat, time, inheritable): #maximum optimization is needed in this case
+		self = cls()
+		self.msPerBeat = msPerBeat
+		self.time = time
+		self.inheritable = inheritable
+		return self
+	
+	def saveToDatabase(cls, osudb: BinaryFile) -> None:
 		osudb.writeDouble(self.msPerBeat)
 		osudb.writeDouble(self.time)
 		osudb.writeByte(self.inheritable)
 
-	def getSaveString(self):
+	def __str__(self) -> str:
 		return f'{self.time},{self.msPerBeat},{self.beatsPerBar},{self.hitSound.sampleSet},{self.hitSound.customIndex},{self.hitSound.volume},{int(self.inheritable)},{self.kiaiFlags}'

@@ -1,253 +1,198 @@
+from __future__ import annotations #allow referencing a not-yet-declared type
 from .enums import *
 from .timing import TimingPoint
-import datetime, os.path
+from .utility import SortedList, add_slots
+import posixpath, ntpath, re
+from dataclasses import dataclass, field
+from typing import List, Dict
 
-class BeatmapMetadata:
-	def __init__(self):
-		self.artistA = ''
-		self.artistU = ''
-		self.titleA = ''
-		self.titleU = ''
-		self.creator = ''
-		self.diffName = ''
-		self.audioFile = ''
-		self.hash = ''
-		self.beatmapFile = ''
+@add_slots
+@dataclass
+class DifficultyRating:
+	"""Map difficulty rating..
+	"""
+	SR: Optional[float] = None
 
-		self.state = 0
-		self.circles = 0
-		self.sliders = 0
-		self.spinners = 0
-		self.lastEdit = datetime.datetime(1,1,1)
-		self.AR = 0.0
-		self.CS = 0.0
-		self.HP = 0.0
-		self.OD = 0.0
-		self.SV = 0.0
-		self.SR = [{},{},{},{}]
-		self.drainTime = 0
-		self.totalTime = 0
-		self.previewTime = 0
+@add_slots
+@dataclass
+class BeatmapMetadataBase:
+	"""Beatmap metadata.
+	"""
+	
+	#: Artist ASCII
+	artistA: str = ''
+	#: Artist Unicode (if ASCII isn't enough). Not available for API results.
+	artistU: Optional[str] = None
+	#: Title ASCII
+	titleA: str = ''
+	#: Title Unicode (if ASCII isn't enough). Not available for API results.
+	titleU: Optional[str] = None
+	#: Map creator
+	creator: str = ''
+	#: Difficulty name
+	diffName: str = ''
+	#: md5 hash of the beatmap file
+	hash: str = ''
+	#: Ranking status
+	status: OnlineMapStatus = OnlineMapStatus.UNKNOWN
+	#: Circle count
+	circleCount: int = 0
+	#: Slider and hold note count
+	sliderCount: int = 0
+	#: Spinner count
+	spinnerCount: int = 0
+	#: Approach Rate
+	AR: float = 0.0
+	#: Circle Size
+	CS: float = 0.0
+	#: HP Drain Rate
+	HP: float = 0.0
+	#: Overall Difficulty/Accuracy
+	OD: float = 0.0
+	#: Star ratings by mode and mods combination. The first key is `Mode`, and the second one is `Mods`. Both keys are required because mods like DT and HR can change SR.
+	SR: List[Dict[Mods, DifficultyRating]] = field(default_factory=lambda: [{} for i in range(4)])
+	#: Drain time: the time during which the health-bar drains in milliseconds. Stored with 1-second precision.
+	drainTime: int = 0
+	#: Total time: drain time combined with break periods. API results only give it with 1-second precision.
+	totalTime: int = 0
+	#: Online map ID
+	id: Optional[int] = None
+	#: Mapset ID
+	mapsetID: Optional[int] = None
+	#: The mode the map was created for.
+	mode: Mode = Mode.OSU
+	#: Song source
+	source: str = ''
+	#: Tags
+	tags: str = ''
+	
+	@property
+	def artist(self) -> str:
+		"""Song artist (Uses unicode name if available)
+		"""
+		return self.artistU if self.artistU else self.artistA
 
-		self.timingPoints = []
+	@property
+	def title(self) -> str:
+		"""Song title (Uses unicode title if available)
+		"""
+		return self.titleU if self.titleU else self.titleA
+	
+	def hasSRData(self, mode: Mode = Mode.OSU) -> bool:
+		"""Whether the star rating data for selected mode has been calculated
+		
+		:param mode: The mode to check the data for, defaults to `Mode.OSU`
+		"""
+		return len(self.SR.get(mode, [])) > 0
 
-		self.mapID = 0
-		self.mapsetID = -1
-		self.threadID = 0
-		self.playerRank = [Rank.N for i in range(4)]
-		self.offset = 0
-		self.stackLeniency = 0.0
-		self.mode = Mode.STD
-		self.source = ''
-		self.tags = ''
-		self.onlineOffset = 0
-		self.onlineTitle = ''
-		self.isNew = 0
-		self.lastPlayed = datetime.datetime(1,1,1)
-		self.osz2 = 0
-		self.directory = ''
-		self.lastSync = datetime.datetime(1,1,1)
-		self.disableHitSounds = 0
-		self.disableSkin = 0
-		self.disableSb = 0
-		self.disableVideo = 0
-		self.bgDim = 0
+	@property
+	def columnCount(self) -> int:
+		"""osu!mania column/key count
+		"""
+		return int(self.CS) # TODO round or floor?
+	@columnCount.setter
+	def columnCount(self, val: int) -> None:
+		self.CS = int(val)
+	keyCount = columnCount
 
-		self.lastEdit = 0
-		self.unk0 = 0
-
-	@classmethod
-	def fromOsuDb(cls, osudb):
-		self = cls()
-		self.artistA = osudb.readOsuString()
-		self.artistU = osudb.readOsuString()
-		self.titleA = osudb.readOsuString()
-		self.titleU = osudb.readOsuString()
-		self.creator = osudb.readOsuString()
-		self.diffName = osudb.readOsuString()
-		self.audioFile = osudb.readOsuString()
-		self.hash = osudb.readOsuString()
-		self.beatmapFile = osudb.readOsuString()
-
-		self.state = osudb.readByte()
-		self.circles = osudb.readShort()
-		self.sliders = osudb.readShort()
-		self.spinners = osudb.readShort()
-		self.lastEdit = osudb.readOsuTimestamp()
-		self.AR = osudb.readFloat()
-		self.CS = osudb.readFloat()
-		self.HP = osudb.readFloat()
-		self.OD = osudb.readFloat()
-		self.SV = osudb.readDouble()
-		self.SR = []
-		for i in range(4):
-			modComboCnt = osudb.readInt()
-			SRs = {}
-			for i in range(modComboCnt):
-				mods = int(osudb.readOsuAny())
-				sr = float(osudb.readOsuAny())
-				SRs[mods] = sr
-			self.SR.append(SRs)
-		self.drainTime = osudb.readInt()
-		self.totalTime = osudb.readInt()
-		self.previewTime = osudb.readInt()
-
-		self.timingPoints = []
-		timingPointCnt = osudb.readInt()
-		for i in range(timingPointCnt):
-			self.timingPoints.append(TimingPoint.fromOsuDb(osudb))
-
-		self.mapID = osudb.readInt()
-		self.mapsetID = osudb.readInt()
-		self.threadID = osudb.readInt()
-		for i in [Mode.OSU, Mode.CTB, Mode.TAIKO, Mode.MANIA]:
-			self.playerRank[i] = osudb.readByte()
-		self.offset = osudb.readShort()
-		self.stackLeniency = osudb.readFloat()
-		self.mode = osudb.readByte()
-		self.source = osudb.readOsuString()
-		self.tags = osudb.readOsuString()
-		self.onlineOffset = osudb.readShort()
-		self.onlineTitle = osudb.readOsuString()
-		self.isNew = osudb.readByte()
-		self.lastPlayed = osudb.readOsuTimestamp()
-		self.osz2 = osudb.readByte()
-		self.directory = osudb.readOsuString()
-		self.lastSync = osudb.readOsuTimestamp()
-		self.disableHitSounds = osudb.readByte()
-		self.disableSkin = osudb.readByte()
-		self.disableSb = osudb.readByte()
-		self.disableVideo = osudb.readByte()
-		self.bgDim = osudb.readShort()
-
-		self.lastEdit = osudb.readInt()
-
-		return self
-
-	def writeToDatabase(self, osudb):
-		osudb.writeOsuString(self.artistA)
-		osudb.writeOsuString(self.artistU)
-		osudb.writeOsuString(self.titleA)
-		osudb.writeOsuString(self.titleU)
-		osudb.writeOsuString(self.creator)
-		osudb.writeOsuString(self.diffName)
-		osudb.writeOsuString(self.audioFile)
-		osudb.writeOsuString(self.hash)
-		osudb.writeOsuString(self.beatmapFile)
-
-		osudb.writeByte(self.state)
-		osudb.writeShort(self.circles)
-		osudb.writeShort(self.sliders)
-		osudb.writeShort(self.spinners)
-		osudb.writeOsuTimestamp(self.lastEdit)
-		osudb.writeFloat(self.AR)
-		osudb.writeFloat(self.CS)
-		osudb.writeFloat(self.HP)
-		osudb.writeFloat(self.OD)
-		osudb.writeDouble(self.SV)
-		for SRs in self.SR:
-			osudb.writeInt(len(SRs.keys()))
-			for mods,sr in SRs.items():
-				osudb.writeByte(8)
-				osudb.writeInt(mods)
-				osudb.writeByte(0xD)
-				osudb.writeDouble(sr)
-		osudb.writeInt(self.drainTime)
-		osudb.writeInt(self.totalTime)
-		osudb.writeInt(self.previewTime)
-
-		osudb.writeInt(len(self.timingPoints))
+@add_slots
+@dataclass
+class BeatmapLocalBase(BeatmapMetadataBase):
+	"""Base for locally stored beatmaps.
+	"""
+	
+	#: Relative path to the audio file
+	audioFile: Optional[str] = None
+	#: Relative path to the beatmap file
+	beatmapFile: Optional[str] = None
+	#: Base Slider Velocity
+	SV: Optional[float] = None
+	#: The song preview time in milliseconds
+	previewTime: Optional[int] = None
+	#: Timing points
+	timingPoints: SortedList[TimingPoint] = field(default_factory=lambda: SortedList(key=lambda x: x.time))
+	#: Stack leniency
+	stackLeniency: Optional[float] = 0.0
+	
+	def inheritableTimingPointAt(self, time: int) -> Optional[TimingPoint]:
+		"""Get inheritable (red) timing point at a certain position.
+		
+		:param time: Time in milliseconds.
+		:return: Inheritable timing point active at given time (or None if there's no inheritable timing point at that position).
+		"""
+		lastTp = None
 		for tp in self.timingPoints:
-			tp.writeToDatabase(osudb)
-
-		osudb.writeInt(self.mapID)
-		osudb.writeInt(self.mapsetID)
-		osudb.writeInt(self.threadID)
-		for i in [Mode.OSU, Mode.CTB, Mode.TAIKO, Mode.MANIA]:
-			osudb.writeByte(self.playerRank[i])
-		osudb.writeShort(self.offset)
-		osudb.writeFloat(self.stackLeniency)
-		osudb.writeByte(self.mode)
-		osudb.writeOsuString(self.source)
-		osudb.writeOsuString(self.tags)
-		osudb.writeShort(self.onlineOffset)
-		osudb.writeOsuString(self.onlineTitle)
-		osudb.writeByte(self.isNew)
-		osudb.writeOsuTimestamp(self.lastPlayed)
-		osudb.writeByte(self.osz2)
-		osudb.writeOsuString(self.directory)
-		osudb.writeOsuTimestamp(self.lastSync)
-		osudb.writeByte(self.disableHitSounds)
-		osudb.writeByte(self.disableSkin)
-		osudb.writeByte(self.disableSb)
-		osudb.writeByte(self.disableVideo)
-		osudb.writeShort(self.bgDim)
-
-		osudb.writeInt(self.lastEdit)
-		if osudb.version > 20160403:
-			osudb.writeInt(self.unk0)
-
-		return self
-
-	def hasSRData(self, mode=0):
-		return len(self.SR[mode]) > 0
+			if not tp.inheritable:
+				continue
+			if time > tp.time:
+				break
+			lastTp = tp
+		return lastTp
+	
+	def timingPointAt(self, time: int) -> Optional[TimingPoint]:
+		"""Get timing point at a certain position.
+		
+		:param time: Time in milliseconds.
+		:return: Timing point at given time (or None if there's no timing point at that position).
+		"""
+		lastTp = None
+		for tp in self.timingPoints:
+			if time > tp.time:
+				break
+			lastTp = tp
+		return lastTp
+	
+	def sliderVelocityAt(self, time: int) -> Optional[float]:
+		"""Get slider velocity at a certain position.
+		
+		:param time: Time in milliseconds.
+		:return: Timing point at given time (or None if there's no timing point at that position).
+		"""
+		tp = self.timingPointAt(time)
+		if tp is not None:
+			return self.SV * tp.SV
 
 	@property
-	def path(self):
-		return os.path.join(self.directory, self.beatmapFile)
-	@path.setter
-	def path(self, val):
-		dirFile = val.split('/')
-		if len(dirFile) == 1:
-			dirFile = val.split('\\')
-		if len(dirFile) != 2:
-			raise ValueError('Invalid path')
-		self.directory = dirFile[0]
-		self.beatmapFile = dirFile[1]
-
-	@property
-	def osuRank(self):
+	def osuRank(self) -> Rank:
+		"""The player rank in osu!standard
+		"""
 		return self.playerRank[Mode.OSU]
 	@osuRank.setter
-	def osuRank(self, val):
+	def osuRank(self, val: Rank) -> None:
 		self.playerRank[Mode.OSU] = val
 	stdRank = osuRank
 
 	@property
-	def taikoRank(self):
+	def taikoRank(self) -> Rank:
+		"""The player rank in osu!taiko
+		"""
 		return self.playerRank[Mode.TAIKO]
-	@osuRank.setter
-	def taikoRank(self, val):
+	@taikoRank.setter
+	def taikoRank(self, val: Rank) -> None:
 		self.playerRank[Mode.TAIKO] = val
 
 	@property
-	def ctbRank(self):
-		return self.playerRank[Mode.CTB]
-	@osuRank.setter
-	def ctbRank(self, val):
-		self.playerRank[Mode.CTB] = val
+	def catchRank(self) -> Rank:
+		"""The player rank in osu!catch
+		"""
+		return self.playerRank[Mode.CATCH]
+	@catchRank.setter
+	def catchRank(self, val: Rank) -> None:
+		self.playerRank[Mode.CATCH] = val
+	fruitsRank = catchRank
+	ctbRank = catchRank
 
 	@property
-	def maniaRank(self):
+	def maniaRank(self) -> Rank:
+		"""The player rank in osu!mania
+		"""
 		return self.playerRank[Mode.MANIA]
-	@osuRank.setter
-	def maniaRank(self, val):
+	@maniaRank.setter
+	def maniaRank(self, val: Rank) -> None:
 		self.playerRank[Mode.MANIA] = val
-
-	@property
-	def artist(self):
-		if self.artistU is not None and len(self.artistU) > 0:
-			return self.artistU
-		return self.artistA
-
-	@property
-	def title(self):
-		if self.titleU is not None and len(self.titleU) > 0:
-			return self.titleU
-		return self.titleA
-
-	def __str__(self):
+	
+	def __str__(self) -> str:
 		return f'{self.artist} - {self.title} [{self.diffName}]'
 
-	def __repr__(self):
-		return f'BeatmapMetadata(hash={repr(self.hash)}, artist={repr(self.artist)}, title={repr(self.title)}, diffName={repr(self.diffName)})'
+	def __repr__(self) -> str:
+		return f'{type(self).__name__}(hash={repr(self.hash)}, artist={repr(self.artist)}, title={repr(self.title)}, diffName={repr(self.diffName)})'

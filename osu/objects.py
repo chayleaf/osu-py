@@ -1,276 +1,366 @@
+from __future__ import annotations #allow referencing a not-yet-declared type
+from dataclasses import dataclass, field
+from typing import Optional, List
 from .enums import *
+from .utility import add_slots
 
-class SampleSet:
-	ALL = -1
-	ANY = ALL
-	NONE = 0
-	AUTO = NONE
-	NORMAL = 1
-	SOFT = 2
-	DRUM = 3
-	
-	@staticmethod
-	def name(set):
-		if set == 0:
-			return 'Auto'
-		if set == 1:
-			return 'Normal'
-		if set == 2:
-			return 'Soft'
-		if set == 3:
-			return 'Drum'
-
+@add_slots
+@dataclass
 class HitSound:
-	NONE = 0
-	NORMAL = 1
-	WHISTLE = 2
-	FINISH = 4
-	CLAP = 8
-
-	def __init__(self, hitSound=0, **kwargs):
-		self.sounds = hitSound
-		self.sampleSet = kwargs.get('sampleSet', SampleSet.AUTO)
-		self.additionSet = kwargs.get('additionSet', SampleSet.AUTO)
-
-		#below fields aren't available for sliders
-		self.customIndex = kwargs.get('customIndex', 0)
-		#below fields aren't available for event triggers
-		self.volume = kwargs.get('sampleVolume', 100)
-		self.filenameOverride = kwargs.get('filename', '') #override default file path which is {sampleSetName}-hit{soundType}{index}.wav
-
-	def _loadExtraSampleInfo(self, objectInfo, i):
+	"""Object hit sound. Can be played without objects in certain cases.
+	"""
+	
+	sounds: SoundEffects = field(default_factory=SoundEffects)
+	sampleSet: SampleSet = SampleSet.AUTO
+	additionSet: SampleSet = SampleSet.AUTO
+	#: Not available for sliders
+	customIndex: int = 0
+	#: Not available for sliders and event triggers
+	volume: float = 1.0
+	#: Override default file path. Not available for sliders and event triggers
+	filenameOverride: Optional[str] = None
+	
+	@property
+	def normal(self) -> bool: return self.sounds.normal
+	@normal.setter
+	def normal(self, val: bool) -> None: self.sounds.normal = val
+	@property
+	def whistle(self) -> bool: return self.sounds.whistle
+	@whistle.setter
+	def whistle(self, val: bool) -> None: self.sounds.whistle = val
+	@property
+	def finish(self) -> bool: return self.sounds.finish
+	@finish.setter
+	def finish(self, val: bool) -> None: self.sounds.finish = val
+	@property
+	def clap(self) -> bool: return self.clap.normal
+	@clap.setter
+	def clap(self, val: bool) -> None: self.clap.normal = val
+	
+	@property
+	def serializableForEventTrigger(self) -> bool:
+		return self.volumePercentage == 100.0 and not self.filenameOverride
+	
+	@property
+	def serializableForSliderEdge(self) -> bool:
+		return self.serializableForEventTrigger and self.customIndex == 0
+	
+	@property
+	def volumePercentage(self) -> float:
+		return self.volume * 100.0
+	@volumePercentage.setter
+	def volumePercentage(self, v: float) -> None:
+		self.volume = v / 100.0
+	
+	def loadExtraSampleInfo(self, objectInfo: List[str], i: int) -> None:
+		"""Load sample info from a list at a given position, or ignore if the element at given position doesn't exist.
+		
+		:param objectInfo: List to load the data from
+		:param i: Index
+		"""
 		if i >= len(objectInfo):
 			return
 		extras = objectInfo[i].split(':')
 		if len(extras) != 5:
 			return
-		self.sampleSet = int(extras[0])
-		self.additionSet = int(extras[1])
+		self.sampleSet = SampleSet(int(extras[0]))
+		self.additionSet = SampleSet(int(extras[1]))
 		self.customIndex = int(extras[2])
-		self.volume = int(extras[3])
+		self.volumePercentage = int(extras[3])
 		self.filenameOverride = extras[4]
 
-	def _getExtrasString(self):
-		return f'{self.sampleSet}:{self.additionSet}:{self.customIndex}:{self.volume}:{self.filenameOverride}'
+	def __str__(self) -> str:
+		return f'{self.sampleSet:d}:{self.additionSet:d}:{self.customIndex:d}:{int(self.volumePercentage):d}:{self.filenameOverride}'
 	
-	def filenameForSound(self, sound, object='hit', mode=Mode.STD):
+	@property
+	def beatmapSpecific(self) -> bool:
+		"""Whether the file will be loaded from beatmap directory.
+		"""
+		return self.customIndex or self.filenameOverride
+	
+	def filenameForSound(self, sound: str, object: str = 'hit', mode: Mode = Mode.STD) -> str:
+		"""Get the filename that would be used by the game for this hitsound.
+		
+		:param sound: 'normal', 'whistle', 'finish', 'clap' or slider-exclusive 'tick'
+		:param object: 'hit' or 'slider', defaults to 'hit'
+		:param mode: Game mode, defaults to `Mode.STD`
+		:return: The filename loaded by game.
+		"""
 		modeStr = ''
 		if mode == Mode.TAIKO:
 			modeStr = 'taiko-'
-		return self.filenameOverride if self.filenameOverride else f'{modeStr}{SampleSet.name(self.sampleSet).tolower()}-{object}{sound}'
+		if object == 'slider':
+			if sound == 'normal':
+				sound = 'slide'
+		elif sound == 'tick':
+			raise ValueError('Only sliders can play tick sounds')
+		if sound not in ['normal', 'whistle', 'finish', 'clap', 'tick']:
+			raise ValueError('Invalid sound type')
+		if object not in ['hit', 'slider']:
+			raise ValueError('Invalid object type')
+		index = str(self.customIndex) if self.customIndex < 2 else ''
+		
+		return self.filenameOverride if self.filenameOverride else f'{modeStr}{str(self.sampleSet).tolower()}-{object}{sound}{index}'
 
-	@property
-	def normal(self):
-		return (self.sounds & self.NORMAL) != 0
-	@normal.setter
-	def normal(self, val):
-		if val:
-			self.sounds |= self.NORMAL
-		else:
-			self.sounds &= ~self.NORMAL
-
-	@property
-	def whistle(self):
-		return (self.sounds & self.WHISTLE) != 0
-	@whistle.setter
-	def whistle(self, val):
-		if val:
-			self.sounds |= self.WHISTLE
-		else:
-			self.sounds &= ~self.WHISTLE
-
-	@property
-	def finish(self):
-		return (self.sounds & self.FINISH) != 0
-	@finish.setter
-	def finish(self, val):
-		if val:
-			self.sounds |= self.FINISH
-		else:
-			self.sounds &= ~self.FINISH
-
-	@property
-	def clap(self):
-		return (self.sounds & self.CLAP) != 0
-	@clap.setter
-	def clap(self, val):
-		if val:
-			self.sounds |= self.CLAP
-		else:
-			self.sounds &= ~self.CLAP
-
+@add_slots
+@dataclass
 class HitObject:
-	FLAGS_CIRCLE = 1 << 0
-	FLAGS_SLIDER = 1 << 1
-	FLAGS_COMBO_START = 1 << 2
-	FLAGS_SPINNER = 1 << 3
-	FLAGS_COMBO_COLOR_SKIP = (1 << 4) | (1 << 5) | (1 << 6)
-	FLAGS_MANIA_HOLD_NOTE = 1 << 7
+	"""Base class for in-game objects.
+	"""
+	
+	#: X position. Limited to 512.
+	x: int = 0
+	#: Y position. Limited to 384 in-game, but 512 technically.
+	y: int = 0
+	#: Object time in milliseconds.
+	time: int = 0
+	
+	#: Whether this object is a combo start.
+	comboStart: bool = False
+	#: How many combo colors to skip
+	comboColorSkip: int = 0
+	
+	#: Sound on hit
+	hitSound: HitSound = field(default_factory=HitSound)
+	#: Parent file
+	file: Optional[BeatmapLocalBase] = None
 
-	def __init__(self, **kwargs):
-		#position
-		self.x = kwargs.get('x', 0) #limit is 512
-		self.y = kwargs.get('y', 0) #limit is 384 in-game but technically it is 512
-		self.time = kwargs.get('time', 0) #ms
+	def loadFileData(self, objectInfo: List[str]) -> None:
+		"""Load data, fetched from beatmap file (originally comma-separated)
 		
-		#combo stuff
-		self.comboStart = kwargs.get('comboStart', False) #is this object a combo start?
-		self.comboColorSkip = kwargs.get('comboColorSkip', 0) #how many combo colors should we skip
+		:param objectInfo: Input data
+		"""
+		if len(objectInfo) <= 3:
+			raise ValueError('Object info too short')
 		
-		#which hitsounds to play
-		self.hitSound = HitSound(**kwargs)
-
-	def _loadFromBeatmapFile(self, objectInfo):
 		self.x = int(objectInfo[0])
 		self.y = int(objectInfo[1])
 		self.time = int(objectInfo[2])
-		flags = int(objectInfo[3])
-		self.comboStart = (flags & self.FLAGS_COMBO_START) != 0
-		self.comboColorSkip = (flags & self.FLAGS_COMBO_COLOR_SKIP) >> 4
-		self.hitSound.sounds = int(objectInfo[4])
+		flags = HitObjectFlags(int(objectInfo[3]))
+		self.comboStart = flags.comboStart
+		self.comboColorSkip = flags.comboColorSkip
+		self.hitSound.sounds = SoundEffects(int(objectInfo[4]))
 
 	@staticmethod
-	def fromBeatmapFile(f):
+	def loadFromFile(f: Beatmap) -> Optional[HitObject]:
+		"""Load object from file.
+		
+		:param f: Input file
+		:return: Loaded hit object if the [HitObjects] session hasn't ended, None otherwise
+		"""
+		
 		objectInfo = f.readLine().split(',')
+		if not objectInfo:
+			return None
 		if len(objectInfo) <= 3:
 			raise ValueError('Object info too short')
 
-		flags = int(objectInfo[3])
-		if flags & HitObject.FLAGS_CIRCLE:
+		flags = HitObjectFlags(objectInfo[3])
+		if flags.circle:
 			ret = Circle()
-		elif flags & HitObject.FLAGS_SLIDER:
+		elif flags.slider:
 			ret = Slider()
-		elif flags & HitObject.FLAGS_SPINNER:
+		elif flags.spinner:
 			ret = Spinner()
-		elif flags & HitObject.FLAGS_MANIA_HOLD_NOTE:
+		elif flags.holdNote:
 			ret = ManiaHoldNote()
-
-		ret._loadFromBeatmapFile(objectInfo)
+		else:
+			raise NotImplementedError('Unsupported object type')
+		
+		ret.file = f
+		ret.loadFileData(objectInfo)
 		return ret
+	
+	@property
+	def column(self) -> int:
+		"""osu!mania-specific
+		"""
+		return max(0, min(self.file.keyCount - 1, int(self.x * self.file.keyCount / 512 + 0.5)))
+	@column.setter
+	def column(self, val: int) -> None:
+		self.x = 512 / self.file.keyCount * (val + 0.5)
 
-	def getSaveString(self):
-		flags = 0
+	def __str__(self) -> str:
+		flags = HitObjectFlags()
 		if isinstance(self, Circle):
-			flags |= self.FLAGS_CIRCLE
+			flags.circle = True
 		elif isinstance(self, Slider):
-			flags |= self.FLAGS_SLIDER
+			flags.slider = True
 		elif isinstance(self, Spinner):
-			flags |= self.FLAGS_SPINNER
+			flags.spinner = True
 		elif isinstance(self, ManiaHoldNote):
-			flags |= self.FLAGS_MANIA_HOLD_NOTE
+			flags.holdNote = True
 		else:
 			raise TypeError("Unknown type, override this function to use it")
-		if self.comboStart:
-			flags |= self.FLAGS_COMBO_START
-		flags |= (self.comboColorSkip << 4) & self.FLAGS_COMBO_COLOR_SKIP
-		return f'{self.x},{self.y},{self.time},{flags},{self.hitSound.sounds}'
+		flags.comboStart = self.comboStart
+		flags.comboColorSkip = self.comboColorSkip
+		return f'{self.x:d},{self.y:d},{self.time:d},{flags:d},{self.hitSound.sounds:d}'
 
+@add_slots
+@dataclass
 class Circle(HitObject):
-	def __init__(self, **kwargs):
-		super().__init__(**kwargs)
-
-	def _loadFromBeatmapFile(self, objectInfo):
+	def loadFileData(self, objectInfo: List[str]) -> None:
 		if len(objectInfo) <= 4:
 			raise ValueError('Object info too short')
 
-		super()._loadFromBeatmapFile(objectInfo)
-		self.hitSound._loadExtraSampleInfo(objectInfo, 5)
-
-	def getSaveString(self):
-		return f'{super().getSaveString()},{self.hitSound._getExtrasString()}'
-
-class Slider(HitObject):
-	LINEAR = 0
-	PERFECT = 1
-	BEZIER = 2
-	CATMULL = 3 #deprecated
-
-	STR_TO_TYPE = {'L':LINEAR,'P':PERFECT,'B':BEZIER,'C':CATMULL}
-	TYPE_TO_STR = {LINEAR:'L',PERFECT:'P',BEZIER:'B',CATMULL:'C'}
-	
-	def __init__(self, **kwargs):
-		super().__init__(**kwargs)
-		#edgeAdditions
-		self.sliderType = kwargs.get('sliderType', self.LINEAR)
-		self.curvePoints = kwargs.get('sliderCurvePoints', [])
-		self.sliderLength = kwargs.get('sliderLength', 0)
-		
-		#the last sample is played when the slider is released
-		self.sliderHitSounds = kwargs.get('sliderHitSounds', [])
-		
-		self.repeatCount = kwargs.get('sliderRepeatCount', 1)
+		super().loadFileData(objectInfo)
+		self.hitSound.loadExtraSampleInfo(objectInfo, 5)
 	
 	@property
-	def repeatCount(self):
-		return self._repeatCount
+	def don(self) -> bool:
+		"""osu!taiko-only
+		"""
+		return not self.kat
+	@don.setter
+	def don(self, val: bool) -> None:
+		self.kat = not val
 	
-	@repeatCount.setter
-	def repeatCount(self, val):
-		self._repeatCount = val
-		
-		def resizeList(l, newLen, defaultVal):
-			for i in range(len(l), newLen):
-				l.append(defaultVal)
-			return l[:newLen]
-		
-		self.sliderHitSounds = resizeList(self.sliderHitSounds, val + 1, HitSound())
+	@property
+	def kat(self) -> bool:
+		"""osu!taiko-only
+		"""
+		return self.hitSound.whistle or self.hitSound.clap
+	@kat.setter
+	def kat(self, val: bool) -> None:
+		if not val:
+			self.hitSound.whistle = False
+			self.hitSound.clap = False
+		elif not self.kat:
+			self.hitSound.clap = True
+	
+	@property
+	def big(self) -> bool:
+		"""osu!taiko-only
+		"""
+		return self.hitSound.finish
+	@property
+	def big(self, val: bool) -> None:
+		self.hitSound.finish = val
+	finisher = big
+	
+	def __str__(self) -> str:
+		return f'{super()},{self.hitSound}'
 
-	def _loadFromBeatmapFile(self, objectInfo):
+@add_slots
+@dataclass
+class SliderCurvePoint:
+	"""Slider curve point. Used for slider path calculation.
+	"""
+	
+	x: int = 0
+	y: int = 0
+
+@add_slots
+@dataclass
+class Slider(HitObject):
+	#: Slider path algorithm
+	sliderType: SliderType = SliderType.LINEAR
+	#: Slider curve points
+	curvePoints: List[SliderCurvePoint] = field(default_factory=list)
+	#: Slider length in pixels
+	length: float = 0.0
+	#: Hitsounds that play when hitting edges of the slider's curve. The first sound plays when the slider is first clicked, the last sound plays when the slider's end is hit.
+	edgeSounds: List[HitSound] = field(default_factory=list)
+	#: Amount of times the player has to complete the slider
+	slideCount: int = 1
+	
+	@property
+	def duration(self) -> float:
+		"""Slider duration in milliseconds.
+		"""
+		tp = self.file.timingPointAt(self.time)
+		return self.length * tp.msPerBeat / self.file.SV / tp.SV / 100
+	@duration.setter
+	def duration(self, val: float) -> None:
+		tp = self.file.timingPointAt(self.time)
+		self.length = val / tp.msPerBeat * self.file.SV * tp.SV * 100
+	
+	@property
+	def endTime(self) -> float:
+		return self.time + self.duration
+	@endTime.setter
+	def endTime(self, val: float) -> None:
+		self.duration = val - self.time
+	
+	def loadFileData(self, objectInfo: List[str]) -> None:
 		if len(objectInfo) <= 7:
 			raise ValueError('Object info too short')
 
-		super()._loadFromBeatmapFile(objectInfo)
+		super().loadFileData(objectInfo)
 		sliderPoints = objectInfo[5].split('|')
-		self.sliderType = self.STR_TO_TYPE[sliderPoints[0]]
-		sliderPoints = sliderPoints[1:]
-
-		self.curvePoints = [tuple(map(int, p.split(':'))) for p in sliderPoints]
+		self.sliderType = SliderType.fromFirstLetter(sliderPoints[0])
+		self.curvePoints = [SliderCurvePoint(*map(int, p.split(':'))) for p in sliderPoints[1:]]
 		
-		self.sliderLength = float(objectInfo[7])
+		self.length = float(objectInfo[7])
+		sliderHitSounds = [HitSound(SoundEffects(normal=True))]
 		if 8 < len(objectInfo):
-			self.sliderHitSounds = [HitSound(int(n)) for n in objectInfo[8].split('|')]
+			sliderHitSounds = [HitSound(SoundEffects(int(n))) for n in objectInfo[8].split('|')]
 		if 9 < len(objectInfo):
 			samples = [tuple(map(int, s.split(':'))) for s in objectInfo[9].split('|')]
 			for i in range(len(samples)):
-				a,b = samples[i]
-				self.sliderHitSounds[i].sampleSet = a
-				self.sliderHitSounds[i].additionSet = b
+				a, b = samples[i]
+				sliderHitSounds[i].sampleSet = a
+				sliderHitSounds[i].additionSet = b
+		self.releaseHitSound = sliderHitSounds[-1]
+		self.repeatHitSounds = sliderHitSounds[:-1]
+		self.slideCount = int(objectInfo[6])
+		self.hitSound.loadExtraSampleInfo(objectInfo, 10)
 
-		self.repeatCount = int(objectInfo[6])
-		self.hitSound._loadExtraSampleInfo(objectInfo, 10)
+	def __str__(self) -> str:
+		for sound in self.sliderHitSounds:
+			if not sound.serializableForSliderEdge:
+				raise ValueError("Hitsound with custom index, volume or filename can't be serialized for slider edge.")
+		curvePointsStr = '|'.join(f'{p.x}:{p.y}' for p in self.curvePoints)
+		hitSoundsStr = '|'.join(f'{h.sounds}' for h in self.sliderHitSounds)
+		hitAdditionsStr = '|'.join(f'{h.sampleSet}:{h.additionSet}' for h in self.sliderHitSounds)
+		
+		return f'{super()},{self.sliderType}|{curvePointsStr},{self.slideCount},{self.sliderLength},{hitSoundsStr},{hitAdditionsStr},{self.hitSound}'
 
-	def getSaveString(self):
-		return f'{super().getSaveString()},{self.TYPE_TO_STR[self.sliderType]}|{"|".join(f"{x}:{y}" for x,y in self.curvePoints)},{self.repeatCount},{self.sliderLength},{"|".join(str(h.sounds) for h in self.sliderHitSounds)},{"|".join(f"{h.sampleSet}:{h.additionSet}" for h in self.sliderHitSounds)},{self.hitSound._getExtrasString()}'
-
+@add_slots
+@dataclass
 class Spinner(HitObject):
-	def __init__(self, **kwargs):
-		super().__init__(**kwargs)
-		self.endTime = kwargs.get('endTime', 0)
-
-	def _loadFromBeatmapFile(self, objectInfo):
+	endTime: int = 0
+	
+	@property
+	def duration(self) -> int:
+		"""Spinner duration in milliseconds.
+		"""
+		return self.endTime - self.time
+	@duration.setter
+	def duration(self, val: int) -> None:
+		self.endTime = int(self.time + val)
+	
+	def loadFileData(self, objectInfo: List[str]) -> None:
 		if len(objectInfo) <= 5:
 			raise ValueError('Object info too short')
 
-		super()._loadFromBeatmapFile(objectInfo)
+		super().loadFileData(objectInfo)
 		self.endTime = int(objectInfo[5])
-		self.hitSound._loadExtraSampleInfo(objectInfo, 6)
+		self.hitSound.loadExtraSampleInfo(objectInfo, 6)
 
-	def getSaveString(self):
-		return f'{super().getSaveString()},{self.endTime},{self.hitSound._getExtrasString()}'
+	def __str__(self) -> str:
+		return f'{super()},{self.endTime},{self.hitSound}'
 
+@add_slots
+@dataclass
 class ManiaHoldNote(HitObject):
-	def __init__(self, **kwargs):
-		super().__init__(**kwargs)
-		self.endTime = kwargs.get('endTime', 0)
+	endTime: int = 0
 
-	def _loadFromBeatmapFile(self, objectInfo):
+	@property
+	def duration(self) -> int:
+		return self.endTime - self.time
+	@duration.setter
+	def duration(self, val: int) -> None:
+		self.endTime = int(self.time + val)
+	
+	def loadFileData(self, objectInfo: List[str]) -> None:
 		if len(objectInfo) <= 5:
 			raise ValueError('Object info too short')
 
-		super()._loadFromBeatmapFile(objectInfo)
-		fuckWhoeverThoughtThisIsAGoodIdea = objectInfo[5].split(':', 1)
-		self.endTime = int(fuckWhoeverThoughtThisIsAGoodIdea[0])
-		self.hitSound._loadExtraSampleInfo(fuckWhoeverThoughtThisIsAGoodIdea, 1)
+		super().loadFileData(objectInfo)
+		whoTfThoughtThisIsAGoodIdea = objectInfo[5].split(':', 1)
+		self.endTime = int(whoTfThoughtThisIsAGoodIdea[0])
+		self.hitSound.loadExtraSampleInfo(whoTfThoughtThisIsAGoodIdea, 1)
 
-	def getSaveString(self):
-		return f'{super().getSaveString()},{self.endTime}:{self.hitSound._getExtrasString()}'
+	def __str__(self) -> str:
+		return f'{super()},{self.endTime}:{self.hitSound}'

@@ -1,659 +1,585 @@
+from __future__ import annotations #allow referencing a not-yet-declared type
 from .objects import SampleSet, HitSound
+from .utility import Color, SortedList
+from .enums import *
+from dataclasses import dataclass, astuple, field
+from typing import List, ClassVar
+try:
+	from typing import Final
+except ImportError:
+	Final = ClassVar
 
-class Event:
-	LAYER_BACKGROUND = 0
-	LAYER_FAIL = 1
-	LAYER_PASS = 2
-	LAYER_FOREGROUND = 3
-
-	def __init__(self, **kwargs):
-		self.transformEvents = kwargs.get('transformEvents', [])
-
-	@staticmethod
-	def _parseLayer(l):
-		if l.isnumeric():
-			return int(l)
-		elif l == 'Background':
-			return 0
-		elif l == 'Fail':
-			return 1
-		elif l == 'Pass':
-			return 2
-		elif l == 'Foreground':
-			return 3
-
-	@staticmethod
-	def _serializeLayer(l):
-		if l == 0:
-			return 'Background'
-		elif l == 1:
-			return 'Fail'
-		elif l == 2:
-			return 'Pass'
-		elif l == 3:
-			return 'Foreground'
-
-	@staticmethod
-	def fromFile(f):
-		eventInfo = f.parseVariables(f.readLine()).split(',')
-		f.lineBack()
-		if len(eventInfo) == 0 or (len(eventInfo) == 1 and not len(eventInfo[0])):
-			raise ValueError('Event info too short')
-
-		eventType = eventInfo[0]
-		if eventType in ['0', 'Background']:
-			ret = BackgroundEvent()
-		elif eventType in ['1', 'Video']:
-			ret = VideoEvent()
-		elif eventType in ['2', 'Break']:
-			ret = BreakEvent()
-		elif eventType in ['3', 'Colour']:
-			ret = BackgroundColorEvent()
-		elif eventType in ['4', 'Sprite']:
-			ret = SpriteEvent()
-		elif eventType in ['5', 'Sample']:
-			ret = SampleEvent()
-		elif eventType in ['6', 'Animation']:
-			ret = AnimationEvent()
-		else:
-			ev = f.readLine()
-			f.lineBack()
-			raise ValueError(f'Unknown event type: {eventType}; event: {repr(ev)}.')
-
-		ret._loadFromFile(f)
-		ret._loadChildEventsFromFile(f)
-		return ret
-
-	def _loadChildEventsFromFile(self, f):
-		target = None
-		eventTypeDict = {
-			'F':FadeTransform,
-			'M':MoveTransform,
-			'MX':MoveTransform,
-			'MY':MoveTransform,
-			'S':ScaleTransform,
-			'V':VectorScaleTransform,
-			'R':RotateTransform,
-			'C':ColorTransform,
-			'P':ParametersTransform,
-			'L':Loop,
-			'T':TriggeredLoop
-		}
-		while True:
-			eventInfo = f.parseVariables(f.readLine())
-			if len(eventInfo) < 2 or eventInfo[0] not in ' _':
-				f.lineBack()
-				break
+@dataclass
+class TransformCommandContainer:
+	"""A container for storyboard object transform commands, inherited by events and loops.
+	"""
+	
+	transformCommands: SortedList[TransformCommand] = field(default_factory=lambda: SortedList(key=lambda x: x.time))
+	
+	def addTransformCommand(self, cmd: TransformCommand) -> None:
+		self.transformCommands.add(cmd)
+	
+	def getAllCommandsStrings(self) -> List[str]:
+		"""Get all commands' strings for serialization to a storyboard/beatmap file. Note that while this implementation supports nested loops, the official one doesn't.
+		"""
+		
+		ret = []
+		for e in self.transformCommands:
+			s = str(e)
+			eventType, eventConfig = s.split(',', 1)
+			if lastEventType == eventType:
+				ret[-1].append(eventConfig)
+			else:
+				ret.append([' '+s])
+				lastEventType = eventType
 			
-			if eventInfo[1] not in ' _':
-				target = self
+			if isinstance(e, TransformCommandContainer):
+				lastEventType = None
+				ret.extend([' ' + s for s in e.getAllCommandsStrings()])
+		return [','.join(x) for x in ret]
 
-			eventInfo = eventInfo.strip(' ').strip('_').split(',')
-			oldI = -1
-			eventType = eventTypeDict[eventInfo[0]]
-			i = 1
-			while i < len(eventInfo) and i != oldI:
-				oldI = i
+@dataclass
+class Event(TransformCommandContainer):
+	"""Base event type.
+	"""
+	
+	@staticmethod
+	def fromFileData(eventInfo: List[str]) -> None:
+		"""Load an event from .osu/.osb file data.
+		
+		:param eventInfo: event info (originally comma-separated)
+		"""
+		
+		if not eventInfo:
+			raise ValueError('Event info not provided')
 
-				event = eventType()
-				i = event._loadInfoFromFile(eventInfo, i)
+		eventType = EventType(eventInfo[0])
+		if eventType == EventType.BACKGROUND:
+			ret = BackgroundEvent()
+		elif eventType == EventType.VIDEO:
+			ret = VideoEvent()
+		elif eventType == EventType.BREAK:
+			ret = BreakEvent()
+		elif eventType == EventType.COLOR:
+			ret = BackgroundColorEvent()
+		elif eventType == EventType.SPRITE:
+			ret = SpriteEvent()
+		elif eventType == EventType.SAMPLE:
+			ret = SampleEvent()
+		elif eventType == EventType.ANIMATION:
+			ret = AnimationEvent()
 
-				target.transformEvents.append(event)
+		ret.loadFileData(eventInfo)
+		return ret
+	
+	def loadFileData(self, eventInfo: List[str]) -> None:
+		"""Load self from file data.
+		
+		:param eventInfo: event info (originally comma-separated)
+		"""
+		raise NotImplementedError('Override this method to use it')
+	
+	def __str__(self) -> str:
+		raise NotImplementedError('Override this method to use it')
+	
+	def loadFilename(self, filename: str) -> str:
+		"""Parse the filename from event data.
+		
+		:param filename: Stored filename
+		:return: Actual filename
+		"""
+		return filename.strip('"').replace('\\', '/')
+	
+	def saveFilename(self, filename: str) -> str:
+		"""Prepare the filename for saving.
+		
+		:param filename: Original filename
+		:return: Filename used for serialization
+		"""
+		return f'"{filename}"'.replace('\\', '/')
 
-				if eventInfo[0] in 'LT':
-					target = event
+	def getSaveData(self) -> str:
+		"""Get data for serialization to .osu/.osb file.
+		"""
+		return '\n'.join([str(self), *self.getAllCommandsStrings()])
 
-	def _getBaseSaveString(self):
-		return None
-
-	def getSaveString(self):
-		ret = [self._getBaseSaveString()]
-		for e in self.transformEvents:
-			ret.append(' '+e.getSaveString())
-		return '\n'.join(ret)
-
+@dataclass
 class BackgroundEvent(Event):
-	def __init__(self, **kwargs):
-		super().__init__(**kwargs)
-		self.filename = kwargs.get('filename', '')
-		self.time = kwargs.get('time', 0)
-		self.x = kwargs.get('x', 0)
-		self.y = kwargs.get('y', 0)
-
-	def _loadFromFile(self, f):
-		eventInfo = f.parseVariables(f.readLine()).split(',')
+	"""Background image event.
+	"""
+	
+	#: Background file path relatively to the beatmap folder
+	filename: str = ''
+	#: Background start time
+	time: int = 0
+	#: Background offset X
+	x: int = 0
+	#: Background offset Y
+	y: int = 0
+	
+	def loadFileData(self, eventInfo: List[str]) -> None:
 		if len(eventInfo) <= 2:
 			raise ValueError('Event info too short')
-		self.filename = eventInfo[2].strip('"')
+		self.filename = self.loadFilename(eventInfo[2])
 		self.time = int(eventInfo[1])
-		if len(eventInfo) >= 5:
+		if 4 < len(eventInfo):
 			self.x = int(eventInfo[3])
 			self.x = int(eventInfo[4])
 
-	def _getBaseSaveString(self):
-		return f'0,{self.time},{self.filename},{self.x},{self.y}'
+	def __str__(self) -> str:
+		return f'0,{self.time:d},{self.saveFilename(self.filename)},{self.x:d},{self.y:d}'
 
+@dataclass
 class VideoEvent(BackgroundEvent):
-	def __init__(self, **kwargs):
-		super().__init__(**kwargs)
+	"""Background video event.
+	"""
+	
+	def __str__(self) -> str:
+		return f'Video,{self.time:d},{self.saveFilename(self.filename)},{self.x:d},{self.y:d}'
 
-	def _getBaseSaveString(self):
-		return f'Video,{self.time},{self.filename},{self.x},{self.y}'
-
+@dataclass
 class BreakEvent(Event):
-	def __init__(self, **kwargs):
-		super().__init__(**kwargs)
-		self.time = kwargs.get('time', 0)
-		self.endTime = kwargs.get('endTime', 0)
-
-	def _loadFromFile(self, f):
-		eventInfo = f.parseVariables(f.readLine()).split(',')
+	"""Break event.
+	"""
+	
+	time: int = 0
+	endTime: int = 0
+	
+	def loadFileData(self, eventInfo: List[str]) -> None:
 		if len(eventInfo) <= 2:
 			raise ValueError('Event info too short')
 		self.time = int(eventInfo[1])
 		self.endTime = int(eventInfo[2])
 
-	def _getBaseSaveString(self):
-		return f'Break,{self.time},{self.endTime}'
-		
-class BackgroundColorEvent(Event):
-	def __init__(self, **kwargs):
-		super().__init__(**kwargs)
-		self.time = kwargs.get('time', 0)
-		self.r = kwargs.get('r', 0)
-		self.g = kwargs.get('g', 0)
-		self.b = kwargs.get('b', 0)
+	def __str__(self) -> str:
+		return f'2,{self.time:d},{self.endTime:d}'
 
-	def _loadFromFile(self, f):
-		eventInfo = f.parseVariables(f.readLine()).split(',')
+@dataclass	
+class BackgroundColorEvent(Event):
+	"""Background color event (deprecated).
+	"""
+	
+	time: int = 0
+	color: Color = field(default_factory=Color)
+
+	def loadFileData(self, eventInfo: List[str]) -> None:
 		if len(eventInfo) <= 4:
 			raise ValueError('Event info too short')
 		self.time = int(eventInfo[1])
-		self.r, self.g, self.b = map(int, eventInfo[2:5])
+		self.color = Color(*map(int, eventInfo[2:5]))
 
-	def _getBaseSaveString(self):
-		return f'Colour,{self.time},{self.r},{self.g},{self.b}'
+	def __str__(self) -> str:
+		return f'3,{self.time:d},{self.color}'
 
+@dataclass
 class SpriteEvent(Event):
-	ORIGIN_TOPLEFT = 0
-	ORIGIN_TOPCENTRE = 1
-	ORIGIN_TOPRIGHT = 2
-	ORIGIN_CENTRELEFT = 3
-	ORIGIN_CENTRE = 4
-	ORIGIN_CENTRERIGHT = 5
-	ORIGIN_BOTTOMLEFT = 6
-	ORIGIN_BOTTOMCENTRE = 7
-	ORIGIN_BOTTOMRIGHT = 8
-
-	def __init__(self, **kwargs):
-		super().__init__(**kwargs)
-		self.filename = kwargs.get('filename', '')
-		self.x = kwargs.get('x', 0.0)
-		self.y = kwargs.get('y', 0.0)
-		self.origin = kwargs.get('origin', self.ORIGIN_CENTRE)
-		self.layer = kwargs.get('layer', self.LAYER_BACKGROUND)
-
-	@staticmethod
-	def _parseOrigin(o):
-		if o.isnumeric():
-			return int(o)
-
-		if o == 'TopLeft':
-			return 0
-		elif o == 'TopCentre':
-			return 1
-		elif o == 'TopRight':
-			return 2
-		elif o == 'CentreLeft':
-			return 3
-		elif o == 'Centre':
-			return 4
-		elif o == 'CentreRight':
-			return 5
-		elif o == 'BottomLeft':
-			return 6
-		elif o == 'BottomCentre':
-			return 7
-		elif o == 'BottomRight':
-			return 8
-
-		raise ValueError('Invalid origin')
-
-	@staticmethod
-	def _serializeOrigin(o):
-		if o == 0:
-			return 'TopLeft'
-		elif o == 1:
-			return 'TopCentre'
-		elif o == 2:
-			return 'TopRight'
-		elif o == 3:
-			return 'CentreLeft'
-		elif o == 4:
-			return 'Centre'
-		elif o == 5:
-			return 'CentreRight'
-		elif o == 6:
-			return 'BottomLeft'
-		elif o == 7:
-			return 'BottomCentre'
-		elif o == 8:
-			return 'BottomRight'
-
-		raise ValueError('Invalid origin')
-
-	def _loadFromFile(self, f):
-		eventInfo = f.parseVariables(f.readLine()).split(',')
+	"""Sprite object. See https://osu.ppy.sh/help/wiki/Storyboard_Scripting/Objects
+	"""
+	
+	#: Relative path to the sprite file 
+	filename: str = ''
+	#: Initial X offset
+	x: float = 0.0
+	#: Initial Y offset
+	y: float = 0.0
+	#: Sprite origin position, or what part of the image the coordinates define
+	origin: EventOrigin = EventOrigin.TOPLEFT
+	#: Sprite layer
+	layer: EventLayer = EventLayer.BACKGROUND
+	
+	def loadFileData(self, eventInfo: List[str]) -> None:
 		if len(eventInfo) <= 5:
 			raise ValueError('Event info too short')
-		self._loadSpriteEventInfo(eventInfo)
+		self.loadSpriteInfo(eventInfo)
 
-	def _loadSpriteEventInfo(self, eventInfo):
-		self.layer = self._parseLayer(eventInfo[1])
-		self.origin = self._parseOrigin(eventInfo[2])
-		self.filename = eventInfo[3].strip('"')
+	def loadSpriteInfo(self, eventInfo: List[str]) -> None:
+		self.layer = EventLayer(eventInfo[1])
+		self.origin = EventOrigin(eventInfo[2])
+		self.filename = self.loadFilename(eventInfo[3])
 		self.x = float(eventInfo[4])
 		self.y = float(eventInfo[5])
 
-	def _getSpriteBaseSaveString(self):
-		return f'{self._serializeLayer(self.layer)},{self._serializeOrigin(self.origin)},"{self.filename}",{self.x},{self.y}'
+	def getSpriteInfoString(self) -> str:
+		return f'{self.layer:d},{self.origin:d},{self.saveFilename(self.filename)},{self.x:g},{self.y:g}'
 
-	def _getBaseSaveString(self):
-		return 'Sprite,'+self._getSpriteBaseSaveString()
+	def __str__(self) -> str:
+		return f'Sprite,{self.getSpriteInfoString()}'
 
+@dataclass
 class SampleEvent(Event):
-	def __init__(self, **kwargs):
-		super().__init__(**kwargs)
-		self.filename = kwargs.get('filename', '')
-		self.time = kwargs.get('time', 0)
-		self.volume = kwargs.get('volume', 0)
-		self.layer = kwargs.get('layer', self.LAYER_BACKGROUND)
+	"""Audio sample event. See https://osu.ppy.sh/help/wiki/Storyboard_Scripting/Audio
+	"""
+	
+	#: Relative path to the audio file 
+	filename: str = ''
+	#: Start time
+	time: int = 0
+	#: Volume, from 0% to 100% (0.0->1.0)
+	volume: float = 1.0
+	#: Sound layer
+	layer: EventLayer = EventLayer.BACKGROUND
 
-	def _loadFromFile(self, f):
-		eventInfo = f.parseVariables(f.readLine()).split(',')
+	def loadFileData(self, eventInfo: List[str]) -> None:
 		if len(eventInfo) <= 4:
 			raise ValueError('Event info too short')
 		self.time = int(eventInfo[1])
-		self.layer = self._parseLayer(eventInfo[2])
-		self.filename = eventInfo[3].strip('"')
-		self.volume = int(eventInfo[4])
+		self.layer = EventLayer(eventInfo[2])
+		self.filename = self.loadFilename(eventInfo[3])
+		self.volume = int(eventInfo[4] if 4 < len(eventInfo) else 100) / 100
 
-	def _getBaseSaveString(self):
-		return f'Sample,{self.time},{self._serializeLayer(self.layer)},"{self.filename}",{self.volume}'
+	def __str__(self) -> str:
+		return f'Sample,{self.time:d},{self.layer:d},{self.saveFilename(self.filename)},{int(self.volume * 100):d}'
 
+@dataclass
 class AnimationEvent(SpriteEvent):
-	LOOP_FOREVER = 0
-	LOOP_ONCE = 1
+	"""Animation object. See https://osu.ppy.sh/help/wiki/Storyboard_Scripting/Objects
+	"""
 	
-	def __init__(self, **kwargs):
-		super().__init__(**kwargs)
-		self.frameCount = kwargs.get('frameCount', 0)
-		self.frameDelay = kwargs.get('frameDelay', 0.0)
-		self.loopType = self.LOOP_FOREVER
-
-	@staticmethod
-	def _serializeLoopType(t):
-		if t == AnimationEvent.LOOP_FOREVER:
-			return 'Forever'
-		elif t == AnimationEvent.LOOP_ONCE:
-			return 'Once'
-		raise ValueError('Invalid loop type')
-
-	def _loadFromFile(self, f):
-		eventInfo = f.parseVariables(f.readLine()).split(',')
+	frameCount: int = 0
+	frameDelay: float = 0.0
+	loopType: EventLoop = EventLoop.FOREVER
+	
+	def loadFileData(self, eventInfo: List[str]) -> None:
 		if len(eventInfo) <= 7:
 			raise ValueError('Event info too short')
-		self._loadSpriteEventInfo(eventInfo)
+		self.loadSpriteInfo(eventInfo)
 		self.frameCount = int(eventInfo[6])
 		self.frameDelay = float(eventInfo[7])
-		if len(eventInfo) > 8:
-			if eventInfo[8].isnumeric():
-				self.loopType = int(eventInfo[8])
-			elif eventInfo[8] == 'Forever':
-				self.loopType = self.LOOP_FOREVER
-			elif eventInfo[8] == 'Once':
-				self.loopType = self.LOOP_ONCE
-			else:
-				raise ValueError('Invalid loop type')
+		if 8 < len(eventInfo):
+			self.loopType = EventLoop(eventInfo[8])
 
-	def _getBaseSaveString(self):
-		return f'Animation,{self._getSpriteBaseSaveString()},{self.frameCount},{self.frameDelay},{self._serializeLoopType(self.loopType)}'
+	def __str__(self) -> str:
+		return f'Animation,{self.getSpriteInfoString()},{self.frameCount:d},{self.frameDelay:g},{self.loopType:d}'
 
-class SpriteTransformEvent:
-	EASING_NONE = 0
-	EASING_SLOWDOWN = 1
-	EASING_SPEEDUP = 2
+@dataclass
+class BaseCommand:
+	"""Base object transform command class. See https://osu.ppy.sh/help/wiki/Storyboard_Scripting/Commands
+	"""
 	
-	def __init__(self, **kwargs):
-		self.easing = kwargs.get('easing', self.EASING_NONE)
-		self.time = kwargs.get('time', 0)
-		self.endTime = kwargs.get('endTime', 0)
+	#: Start time
+	time: int = 0
+	#: Object type (used only for loading, can be ignored)
+	type: str = ''
+	
+	def loadFileData(self, eventInfo: List[str]) -> None:
+		"""Load self from file data.
+		
+		:param eventInfo: event info (originally comma-separated)
+		"""
+		raise NotImplementedError('Override this method to use it')
+	
+	def __str__(self) -> str:
+		raise NotImplementedError('Override this method to use it')
 
-	def _loadInfoFromFile(self, eventInfo, i):
-		self.easing = int(eventInfo[i])
-		i += 1
-		self.time = int(eventInfo[i])
-		i += 1
-		if len(eventInfo[i]) > 0:
-			self.endTime = int(eventInfo[i])
+@dataclass
+class TransformCommand(BaseCommand):
+	"""Base class for object transform commands.
+	"""
+	
+	easing: EventEasing = EventEasing.NONE
+	endTime: int = 0
+
+	def loadFileData(self, eventInfo: List[str]) -> None:
+		self.easing = EventEasing(eventInfo.pop(0))
+		self.time = int(eventInfo.pop(0))
+		if eventInfo:
+			endTimeStr = eventInfo.pop(0)
+			self.endTime = int(endTimeStr) if endTimeStr else self.time
 		else:
 			self.endTime = self.time
-		i += 1
-		return i
 
-	def _getBaseSaveString(self):
-		return f'{self.easing},{self.time},{self.endTime}'
+	def getTransformString(self) -> str:
+		"""Get transform-related data as string for serialization.
+		"""
+		return f'{self.easing:d},{self.time:d},{self.endTime:d}'
 
-	def getSaveString(self):
-		return None
+	def __str__(self) -> str:
+		raise NotImplementedError('Override this method to use it')
 
-class FadeTransform(SpriteTransformEvent):
-	def __init__(self, **kwargs):
-		super().__init__(**kwargs)
-		self.opacity = kwargs.get('opacity', 0.0)
-		self.endOpacity = kwargs.get('endOpacity', 0.0)
+@dataclass
+class FadeTransformCommand(TransformCommand):
+	"""F command. See https://osu.ppy.sh/help/wiki/Storyboard_Scripting/Commands#fade-(f)-command
+	"""
 	
-	def _loadInfoFromFile(self, eventInfo, i):
-		i = super()._loadInfoFromFile(eventInfo, i)
-		self.opacity = float(eventInfo[i])
-		i += 1
-		if i < len(eventInfo):
-			self.endOpacity = float(eventInfo[i])
-			i += 1
+	#: Start opacity
+	opacity: float = 0.0
+	#: End opacity
+	endOpacity: float = 0.0
+	
+	def loadFileData(self, eventInfo: List[str]) -> None:
+		super().loadFileData(eventInfo)
+		self.opacity = float(eventInfo.pop(0))
+		if len(eventInfo) >= 1:
+			self.endOpacity = float(eventInfo.pop(0))
 		else:
 			self.endOpacity = self.opacity
-		return i
 
-	def getSaveString(self):
-		return f'F,{self._getBaseSaveString()},{self.opacity},{self.endOpacity}'
+	def __str__(self) -> str:
+		return f'F,{self.getTransformString()},{self.opacity:g},{self.endOpacity:g}'
 
-class MoveTransform(SpriteTransformEvent):
-	def __init__(self, **kwargs):
-		super().__init__(**kwargs)
-		self.x = kwargs.get('x', None)
-		self.y = kwargs.get('y', None)
-		self.endX = kwargs.get('endX', None)
-		self.endY = kwargs.get('endY', None)
+@dataclass
+class MoveTransformCommand(TransformCommand):
+	"""M command. See https://osu.ppy.sh/help/wiki/Storyboard_Scripting/Commands#move-(m)-command
+	"""
 	
-	def _loadInfoFromFile(self, eventInfo, i):
-		i = super()._loadInfoFromFile(eventInfo, i)
-
-		loadX = eventInfo[0][-1] != 'Y'
-		loadY = eventInfo[0][-1] != 'X'
-
-		if loadX:
-			self.x = float(eventInfo[i])
-			i += 1
-		else:
-			self.x = None
-
-		if loadY:
-			self.y = float(eventInfo[i])
-			i += 1
-		else:
-			self.y = None
-
-		if loadX:
-			if i < len(eventInfo) and (not loadY or i + 1 < len(eventInfo)):
-				self.endX = float(eventInfo[i])
-				i += 1
-			else:
-				self.endX = self.x
-		else:
-			self.endX = None
-
-		if loadY:
-			if i < len(eventInfo):
-				self.endY = float(eventInfo[i])
-				i += 1
-			else:
-				self.endY = self.y
-		else:
-			self.endY = None
-
-		return i
-
-	def getSaveString(self):
-		if self.x == None:
-			return f'MY,{self._getBaseSaveString()},{self.y},{self.endY}'
-		elif self.y == None:
-			return f'MX,{self._getBaseSaveString()},{self.x},{self.endX}'
-		return f'M,{self._getBaseSaveString()},{self.x},{self.y},{self.endX},{self.endY}'
-
-class ScaleTransform(SpriteTransformEvent):
-	def __init__(self, **kwargs):
-		super().__init__(**kwargs)
-		self.scale = kwargs.get('scale', 0.0)
-		self.endScale = kwargs.get('endScale', 0.0)
+	#: Start X (can be omitted with End X to only move Y)
+	x: Optional[float] = None
+	#: Start Y (can be omitted with End Y to only move X)
+	y: Optional[float] = None
+	#: End X (can be omitted with Start x to only move Y)
+	endX: Optional[float] = None
+	#: End Y (can be omitted with Start Y to only move X)
+	endY: Optional[float] = None
 	
-	def _loadInfoFromFile(self, eventInfo, i):
-		i = super()._loadInfoFromFile(eventInfo, i)
-		self.scale = float(eventInfo[i])
-		i += 1
-		if i < len(eventInfo):
-			self.endScale = float(eventInfo[i])
-			i += 1
-		else:
-			self.endScale = self.scale
-		return i
+	def loadFileData(self, eventInfo: List[str]) -> None:
+		super().loadFileData(eventInfo)
 
-	def getSaveString(self):
-		return f'S,{self._getBaseSaveString()},{self.scale},{self.endScale}'
+		loadX = self.type[-1] != 'Y'
+		loadY = self.type[-1] != 'X'
 
-class VectorScaleTransform(SpriteTransformEvent):
-	def __init__(self, **kwargs):
-		super().__init__(**kwargs)
-		self.scaleX = kwargs.get('scaleX', 0.0)
-		self.scaleY = kwargs.get('scaleY', 0.0)
-		self.endScaleX = kwargs.get('endScaleX', 0.0)
-		self.endScaleY = kwargs.get('endScaleY', 0.0)
+		self.x = float(eventInfo.pop(0)) if loadX else None
+		self.y = float(eventInfo.pop(0)) if loadY else None
+
+		self.endX = (float(eventInfo.pop(0)) if len(eventInfo) >= 1 and (not loadY or len(eventInfo) >= 2) else self.x) if loadX else None
+		self.endY = (float(eventInfo.pop(0)) if len(eventInfo) >= 1 else self.y) if loadY else None
+
+	def __str__(self) -> str:
+		if self.x is None:
+			return f'MY,{self.getTransformString()},{self.y:g},{self.endY:g}'
+		elif self.y is None:
+			return f'MX,{self.getTransformString()},{self.x:g},{self.endX:g}'
+		return f'M,{self.getTransformString()},{self.x:g},{self.y:g},{self.endX:g},{self.endY:g}'
+
+@dataclass
+class ScaleTransformCommand(TransformCommand):
+	"""S command. See https://osu.ppy.sh/help/wiki/Storyboard_Scripting/Commands#scale-(s)-command
+	"""
 	
-	def _loadInfoFromFile(self, eventInfo, i):
-		i = super()._loadInfoFromFile(eventInfo, i)
-		self.scaleX = float(eventInfo[i])
-		i += 1
-		self.scaleY = float(eventInfo[i])
-		i += 1
-		if i + 1 < len(eventInfo):
-			self.endScaleX = float(eventInfo[i])
-			i += 1
-			self.endScaleY = float(eventInfo[i])
-			i += 1
+	#: Start scale
+	scale: float = 0.0
+	#: End scale
+	endScale: float = 0.0
+	
+	def loadFileData(self, eventInfo: List[str]) -> None:
+		super().loadFileData(eventInfo)
+		self.scale = float(eventInfo.pop(0))
+		self.endScale = float(eventInfo.pop(0)) if eventInfo else self.scale
+
+	def __str__(self) -> str:
+		return f'S,{self.getTransformString()},{self.scale:g},{self.endScale:g}'
+
+@dataclass
+class VectorScaleTransformCommand(TransformCommand):
+	"""V command. See https://osu.ppy.sh/help/wiki/Storyboard_Scripting/Commands#scale-(s)-command
+	"""
+	
+	#: Start X scale
+	scaleX: float = 0.0
+	#: Start Y scale
+	scaleY: float = 0.0
+	#: End X scale
+	endScaleX: float = 0.0
+	#: End Y scale
+	endScaleY: float = 0.0
+	
+	def loadFileData(self, eventInfo: List[str]) -> None:
+		super().loadFileData(eventInfo)
+		self.scaleX = float(eventInfo.pop(0))
+		self.scaleY = float(eventInfo.pop(0))
+		if len(eventInfo) >= 2:
+			self.endScaleX = float(eventInfo.pop(0))
+			self.endScaleY = float(eventInfo.pop(0))
 		else:
 			self.endScaleX = self.scaleX
 			self.endScaleY = self.scaleY
-		return i
 
-	def getSaveString(self):
-		return f'V,{self._getBaseSaveString()},{self.scaleX},{self.scaleY},{self.endScaleX},{self.endScaleY}'
+	def __str__(self) -> str:
+		return f'V,{self.getTransformString()},{self.scaleX:g},{self.scaleY:g},{self.endScaleX:g},{self.endScaleY:g}'
 
-class RotateTransform(SpriteTransformEvent):
-	def __init__(self, **kwargs):
-		super().__init__(**kwargs)
-		self.angle = kwargs.get('angle', 0.0)
-		self.endAngle = kwargs.get('endAngle', 0.0)
+@dataclass
+class RotateTransformCommand(TransformCommand):
+	"""R command. See https://osu.ppy.sh/help/wiki/Storyboard_Scripting/Commands#rotate-(r)-command
+	"""
 	
-	def _loadInfoFromFile(self, eventInfo, i):
-		i = super()._loadInfoFromFile(eventInfo, i)
-		self.angle = float(eventInfo[i])
-		i += 1
-		if i < len(eventInfo):
-			self.endAngle = float(eventInfo[i])
-		else:
-			self.endAngle = self.angle
-		return i
-
-	def getSaveString(self):
-		return f'R,{self._getBaseSaveString()},{self.angle},{self.endAngle}'
-
-class ColorTransform(SpriteTransformEvent):
-	def __init__(self, **kwargs):
-		super().__init__(**kwargs)
-		self.color = (kwargs.get('r', 0), kwargs.get('g', 0), kwargs.get('b', 0))
-		self.color = kwargs.get('color', self.color)
-		self.endColor = (kwargs.get('endR', 0), kwargs.get('endG', 0), kwargs.get('endB', 0))
-		self.endColor = kwargs.get('endColor', self.endColor)
+	#: Start angle
+	angle: float = 0.0
+	#: End angle
+	endAngle: float = 0.0
 	
-	def _loadInfoFromFile(self, eventInfo, i):
-		i = super()._loadInfoFromFile(eventInfo, i)
-		self.color = tuple(map(int, (b for b in eventInfo[i:i+3])))
-		i += 3
-		if i + 2 < len(eventInfo):
-			self.endColor = tuple(map(int, (b for b in eventInfo[i:i+3])))
-			i += 3
-		else:
-			self.endColor = (0,0,0)
-		return i
+	def loadFileData(self, eventInfo: List[str]) -> None:
+		super().loadFileData(eventInfo)
+		self.angle = float(eventInfo.pop(0))
+		self.endAngle = float(eventInfo.pop(0)) if eventInfo else self.angle
 
-	def getSaveString(self):
-		return f'C,{self._getBaseSaveString()},{",".join(self.color)},{"".join(self.endColor)}'
+	def __str__(self) -> str:
+		return f'R,{self.getTransformString()},{self.angle:g},{self.endAngle:g}'
 
-class Loop(Event):
-	def __init__(self, **kwargs):
-		self.time = kwargs.get('time', 0)
-		self.loopCount = kwargs.get('loopCount', 0)
-		self.transformEvents = kwargs.get('transformEvents', [])
+@dataclass
+class ColorTransformCommand(TransformCommand):
+	"""C command. See https://osu.ppy.sh/help/wiki/Storyboard_Scripting/Commands#color-/-colour-(c)-command
+	"""
+	
+	#: Start color
+	color: Color = field(default_factory=Color)
+	#: End color
+	endColor: Color = field(default_factory=Color)
+	
+	def loadFileData(self, eventInfo: List[str]) -> None:
+		super().loadFileData(eventInfo)
+		self.color = Color(*map(int, (eventInfo.pop(0) for i in range(3))))
+		self.endColor = Color(*map(int, (eventInfo.pop(0) for i in range(3)))) if len(eventInfo) >= 3 else Color()
 
-	def _loadInfoFromFile(self, eventInfo, i):
-		self.time = int(eventInfo[i])
-		i += 1
-		self.loopCount = int(eventInfo[i])
-		i += 1
-		return i
+	def __str__(self) -> str:
+		return f'C,{self.getTransformString()},{self.color},{self.endColor}'
 
-	def _getBaseSaveString(self):
-		return f'L,{self.time},{self.loopCount}'
+@dataclass
+class LoopCommand(BaseCommand, TransformCommandContainer):
+	"""L command. See https://osu.ppy.sh/help/wiki/Storyboard_Scripting/Compound_Commands#loop-(l)-command
+	"""
+	
+	time: int = 0
+	loopCount: int = 0
+
+	def loadFileData(self, eventInfo: List[str]) -> None:
+		self.time = int(eventInfo.pop(0))
+		self.loopCount = int(eventInfo.pop(0))
+
+	def __str__(self) -> str:
+		return f'L,{self.time:d},{self.loopCount:d}'
 
 class Trigger:
-	PASSING = None
-	FAILING = None
-	HITOBJECTHIT = None
-
-	def __init__(self, name):
+	"""Trigger for `TriggerCommand`.
+	"""
+	
+	#: The passing trigger
+	PASSING: Final[Trigger] = None
+	#: The failing trigger
+	FAILING: Final[Trigger] = None
+	#: The hit object hit trigger
+	HITOBJECTHIT: Final[Trigger] = None
+	
+	def __new__(cls, name: str = '', **kwargs) -> Trigger:
+		if name.upper() == 'PASSING':
+			if len(kwargs):
+				raise ValueError("Passing trigger doesn't accept arguments")
+			return cls.PASSING
+		elif name.upper() == 'FAILING':
+			if len(kwargs):
+				raise ValueError("Failing trigger doesn't accept arguments")
+			return cls.FAILING
+		elif name.upper() == 'HITOBJECTHIT':
+			if len(kwargs):
+				raise ValueError("HitObjectHit trigger doesn't accept arguments")
+			return cls.HITOBJECTHIT
+		elif name.upper().startswith('HITSOUND'):
+			return HitSoundTrigger(name, **kwargs)
+		else:
+			raise ValueError('Invalid trigger type')
+	
+	def __init__(self, name: str) -> None:
 		self.name = name
-
-	def __str__(self):
+	
+	def __str__(self) -> str:
 		return self.name
+	
+	def __eq__(self, other: object) -> bool:
+		return isinstance(other, Trigger) and str(self) == str(other)
 
-	@staticmethod
-	def fromName(s):
-		if s == 'Passing':
-			return Trigger.PASSING
-		elif s == 'Failing':
-			return Trigger.FAILING
-		elif s == 'HitObjectHit':
-			return Trigger.HITOBJECTHIT
-		elif s.startswith('HitSound'):
-			return HitSoundTrigger(name=s)
-		raise ValueError('Invalid trigger name')
+Trigger.PASSING = object.__new__(Trigger)
+Trigger.FAILING = object.__new__(Trigger)
+Trigger.HITOBJECTHIT = object.__new__(Trigger)
+
+Trigger.PASSING.__init__('Passing')
+Trigger.FAILING.__init__('Failing')
+Trigger.HITOBJECTHIT.__init__('HitObjectHit')
 
 class HitSoundTrigger(Trigger):
-	def __init__(self, **kwargs):
-		self.hitSound = HitSound(kwargs)
-		if 'name' in kwargs.keys():
-			self._parseName(kwargs['name'])
+	"""Hit sound trigger for `TriggerCommand`. See https://osu.ppy.sh/help/wiki/Storyboard_Scripting/Compound_Commands#usage.1
+	"""
 
-	def _parseName(self, s):
-		s = s[len("HitSound"):]
-		sampleSets = {'Any': SampleSet.ANY,'None': SampleSet.NONE,'Normal': SampleSet.NORMAL,'Soft': SampleSet.SOFT,'Drum': SampleSet.DRUM}
-		soundTypes = {'None': HitSound.NONE,'Normal': HitSound.NORMAL,'Whistle': HitSound.WHISTLE,'Finish': HitSound.FINISH,'Clap': HitSound.CLAP}
-		self.hitSound.sampleSet = SampleSet.NONE
-		self.hitSound.additionSet = SampleSet.NONE
-		for k,v in sampleSets.items():
-			if s.startswith(k):
-				self.hitSound.sampleSet = v
-				s = s[len(k):]
-				for k,v in sampleSets.items():
-					if s.startswith(k):
-						self.hitSound.additionSet = v
-						s = s[len(k):]
-						break
-				break
+	def __init__(self, name: str = '', hitSound: Optional[HitSound] = None) -> None:
+		self.hitSound = HitSound(hitSound=hitSound) if hitSound is not None else HitSound()
+		if name:
+			name = name[len("HitSound"):]
+			self.hitSound.sampleSet = SampleSet.NONE
+			self.hitSound.additionSet = SampleSet.NONE
+			for set in SampleSet:
+				if name.lower().startswith(set.name.lower()):
+					self.hitSound.sampleSet = set
+					name = name[len(set.name):]
+					for addition in SampleSet:
+						if name.lower().startswith(addition.name.lower()):
+							self.hitSound.additionSet = addition
+							name = name[len(addition.name):]
+							break
+					break
 
-		self.hitSound.sounds = HitSound.NONE
-		for k,v in soundTypes.items():
-			if s.startswith(k):
-				self.hitSound.sounds = v
-				s = s[len(k):]
-				break
-		self.hitSound.customIndex = 0
-		
-		if len(s) > 0:
-			self.hitSound.customIndex = int(s)
+			self.hitSound.sounds = SoundEffects()
+			for sound in SoundEffects:
+				if name.lower().startswith(sound.name.lower()):
+					self.hitSound.sounds = sound.value
+					name = name[len(sound.name):]
+					break
+			self.hitSound.customIndex = 0
+			
+			if len(name) > 0:
+				self.hitSound.customIndex = int(name)
 
-		if self.hitSound.sounds != HitSound.NONE and self.hitSound.sampleSet != SampleSet.NONE and self.hitSound.additionSet == SampleSet.NONE:
-			self.hitSound.additionSet = self.hitSound.sampleSet
-			self.hitSound.sampleSet = SampleSet.ALL
+			if not self.hitSound.sounds.none and self.hitSound.sampleSet != SampleSet.NONE and self.hitSound.additionSet == SampleSet.NONE:
+				self.hitSound.additionSet = self.hitSound.sampleSet
+				self.hitSound.sampleSet = SampleSet.ALL
 
-	def __str__(self):
-		ret = ''
+	def __str__(self) -> str:
 		sampleSet = self.hitSound.sampleSet
 		additionSet = self.hitSound.additionSet
 		sounds = self.hitSound.sounds
-		index = self.hitSound.customIndex
-		if sounds != HitSound.NONE and sampleSet == SampleSet.ALL and additionSet != SampleSet.NONE:
+		if not sounds.none and sampleSet == SampleSet.ALL and additionSet != SampleSet.NONE:
 			sampleSet = additionSet
 			additionSet = SampleSet.NONE
-
 		if sampleSet == SampleSet.NONE:
 			additionSet = SampleSet.NONE
-		sampleSets = {SampleSet.ANY: 'Any',SampleSet.NONE: 'None',SampleSet.NORMAL: 'Normal',SampleSet.SOFT: 'Soft',SampleSet.DRUM: 'Drum'}
-		soundTypes = {HitSound.NONE: 'None',HitSound.NORMAL: 'Normal',HitSound.WHISTLE: 'Whistle',HitSound.FINISH: 'Finish',HitSound.CLAP: 'Clap'}
-		soundType = HitSound.NONE
-		for t in soundTypes.keys():
-			if sounds & t != 0:
-				soundType = sounds & t
-				break
-		sampleSet = (sampleSets[sampleSet] if sampleSet != SampleSet.NONE else "")
-		additionSet = (sampleSets[additionSet] if additionSet != SampleSet.NONE else "")
-		soundType = (soundTypes[soundType] if soundType != HitSound.NONE else "")
-		index = (index if index != 0 else "")
+		soundType = sounds[0] if not sounds.none else ''
+		index = (int(self.hitSound.customIndex) if self.hitSound.customIndex else '')
 		return f'{sampleSet}{additionSet}{soundType}{index}'
 
-Trigger.PASSING = Trigger('Passing')
-Trigger.FAILING = Trigger('Failing')
-Trigger.HITOBJECTHIT = Trigger('HitObjectHit')
-
-class TriggeredLoop(Event):
-	def __init__(self, **kwargs):
-		self.trigger = None
-		self.time = kwargs.get('time', None)
-		self.endTime = kwargs.get('endTime', None)
-		self.triggerGroup = kwargs.get('triggerGroup', 0) #apparently only one trigger with given group can be triggered at once
-		self.transformEvents = kwargs.get('transformEvents', [])
-
-	def _loadInfoFromFile(self, eventInfo, i):
-		self.trigger = Trigger.fromName(eventInfo[i])
-		i += 1
-		if i + 1 < len(eventInfo):
-			self.time = int(eventInfo[i])
-			i += 1
-			self.endTime = int(eventInfo[i])
-			i += 1
+@dataclass
+class TriggerCommand(BaseCommand, TransformCommandContainer):
+	"""T command. See https://osu.ppy.sh/help/wiki/Storyboard_Scripting/Compound_Commands#trigger-(t)-command
+	"""
+	
+	#: Trigger
+	trigger: Trigger = Trigger('Passing')
+	#: Start time
+	time: int = 0
+	#: End time
+	endTime: int = 0
+	#: Trigger group. If the group isn't zero, only one trigger with that group can be triggered at a time (probably)
+	triggerGroup: int = 0 
+	
+	def loadFileData(self, eventInfo: List[str]) -> None:
+		self.trigger = Trigger(eventInfo.pop(0))
+		if len(eventInfo) >= 2:
+			self.time = int(eventInfo.pop())
+			self.endTime = int(eventInfo.pop())
+			if eventInfo:
+				self.triggerGroup = int(eventInfo.pop())
 		else:
-			self.time = None
-			self.endTime = None
-		if i < len(eventInfo):
-			self.triggerGroup = int(eventInfo[i])
-			i += 1
-		return i
+			self.time = 0
+			self.endTime = 0
 
-	def _getBaseSaveString(self):
-		return f'T,{str(self.trigger)},{self.time},{self.endTime},{self.triggerGroup}'
+	def __str__(self) -> str:
+		return f'T,{self.trigger},{self.time:d},{self.endTime:d},{self.triggerGroup:d}'
 
-class ParametersTransform(SpriteTransformEvent):
-	HFLIP = 0
-	VFLIP = 1
-	ADDITIVEBLEND = 2
+@dataclass
+class ParametersTransformCommand(TransformCommand):
+	"""P command. See https://osu.ppy.sh/help/wiki/Storyboard_Scripting/Commands#parameter-(p)-command
+	"""
 	
-	def __init__(self, **kwargs):
-		super().__init__(**kwargs)
-		self.effect = kwargs.get('effect', self.HFLIP)
-	
-	def _loadInfoFromFile(self, eventInfo, i):
-		i = super()._loadInfoFromFile(eventInfo, i)
-		self.effect = int(eventInfo[i])
-		return i + 1
+	type: OsuParameterType = OsuParameterType.HORIZONTALFLIP
+		
+	def loadFileData(self, eventInfo: List[str]) -> None:
+		super().loadFileData(eventInfo)
+		self.type = OsuParameterType(eventInfo.pop())
 
-	def getSaveString(self):
-		return f'P,{self._getBaseSaveString()},{self.effect}'
+	def __str__(self) -> str:
+		return f'P,{self.getTransformString()},{self.type}'
