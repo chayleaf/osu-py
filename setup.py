@@ -5,7 +5,7 @@ with open("README.md", "r") as f:
 
 setuptools.setup(
 	name='osu.py',
-	version='0.0.21',
+	version='1.0.0a0',
 	author='pavlukivan',
 	author_email='ivanpavluk00@gmail.com',
 	description='A multipurpose osu! library, aiming to cover practically any use case over time',
@@ -21,7 +21,7 @@ setuptools.setup(
 		'Programming Language :: Python :: 3 :: Only',
 		'Topic :: Games/Entertainment',
 	],
-	keywords='osu api osugame beatmap collection score db',
+	keywords='osu api osugame beatmap collection score replay db osb storyboard osr',
 	install_requires=[],
-	python_requires='>=3',
+	python_requires='>=3.7',
 )
